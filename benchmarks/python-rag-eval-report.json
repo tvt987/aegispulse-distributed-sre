@@ -1,0 +1,11 @@
+{
+  "generatedAtUtc": "2026-11-25T16:05:10Z",
+  "goldenQueriesCount": 10,
+  "adversarialOodQueriesCount": 5,
+  "recallAt1": 1.0,
+  "recallAt3": 1.0,
+  "mrr": 1.0,
+  "abstentionPrecision": 1.0,
+  "p50LatencyMs": 0.965,
+  "p95LatencyMs": 1.238
+}

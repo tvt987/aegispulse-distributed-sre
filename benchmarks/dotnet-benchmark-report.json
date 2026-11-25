@@ -1,0 +1,56 @@
+{
+  "generatedAtUtc": "2026-11-25T16:05:05.934008+00:00",
+  "dotnetRuntime": ".NET 10.0.12",
+  "osArchitecture": "X64",
+  "processorCount": 8,
+  "runs": [
+    {
+      "label": "Naive Unprotected (TOCTOU Race Bug)",
+      "mode": "NaiveUnprotected",
+      "concurrentRequests": 2500,
+      "initialStock": 500,
+      "elapsedMs": 24.7,
+      "throughputRps": 101221,
+      "confirmedAllocations": 971,
+      "overAllocatedUnits": 471,
+      "idempotentReplaysBlocked": 0,
+      "casRetries": 0,
+      "p50LatencyMs": 0.003,
+      "p95LatencyMs": 13.979,
+      "p99LatencyMs": 14.348,
+      "invariantIntact": false
+    },
+    {
+      "label": "Optimistic RowVersion CAS \u002B Idempotency",
+      "mode": "OptimisticCas",
+      "concurrentRequests": 10000,
+      "initialStock": 500,
+      "elapsedMs": 71.89,
+      "throughputRps": 139099,
+      "confirmedAllocations": 500,
+      "overAllocatedUnits": 0,
+      "idempotentReplaysBlocked": 2000,
+      "casRetries": 24,
+      "p50LatencyMs": 0.006,
+      "p95LatencyMs": 0.014,
+      "p99LatencyMs": 0.043,
+      "invariantIntact": true
+    },
+    {
+      "label": "Aegis Lock-Free Sharded Channel \u002B Atomic Quota",
+      "mode": "AegisLockFreeChannel",
+      "concurrentRequests": 10000,
+      "initialStock": 500,
+      "elapsedMs": 99.69,
+      "throughputRps": 100315,
+      "confirmedAllocations": 500,
+      "overAllocatedUnits": 0,
+      "idempotentReplaysBlocked": 2000,
+      "casRetries": 3,
+      "p50LatencyMs": 0.006,
+      "p95LatencyMs": 0.014,
+      "p99LatencyMs": 0.061,
+      "invariantIntact": true
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+services:
+  aegis-kernel-dotnet:
+    build:
+      context: ./services/aegis-kernel-dotnet
+      dockerfile: Dockerfile
+    ports:
+      - "5080:5080"
+    environment:
+      - ASPNETCORE_URLS=http://+:5080
+
+  aegis-sre-agent-python:
+    build:
+      context: ./services/aegis-sre-agent-python
+      dockerfile: Dockerfile
+    ports:
+      - "8090:8090"
+
+  mission-control-web:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./web/mission-control:/app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - aegis-kernel-dotnet
+      - aegis-sre-agent-python
