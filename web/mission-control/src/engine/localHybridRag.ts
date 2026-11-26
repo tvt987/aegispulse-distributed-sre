@@ -245,20 +245,37 @@ const INDEXED_DOCS = EDGE_RUNBOOKS.map((doc) => {
     doc.reference_code,
   ].join(' ');
   const tokens = tokenize(blob);
-  return { doc, tokens, vec: embedDense384(blob) };
+  const tokenSet = new Set(tokens);
+  return { doc, tokens, tokenSet, vec: embedDense384(blob) };
 });
 
 const DOC_FREQS: Record<string, number> = {};
 for (const item of INDEXED_DOCS) {
-  for (const ut of new Set(item.tokens)) {
+  for (const ut of item.tokenSet) {
     DOC_FREQS[ut] = (DOC_FREQS[ut] || 0) + 1;
   }
 }
 const AVG_DL = INDEXED_DOCS.reduce((s, d) => s + d.tokens.length, 0) / INDEXED_DOCS.length;
 
-export function queryEdgeHybridRag(query: string, topK = 3, minConfidence = 0.22): RagQueryResponse {
+export function describeFusionMode(alpha: number): string {
+  if (alpha <= 0.1) return 'Pure Lexical (Okapi BM25)';
+  if (alpha >= 0.9) return 'Pure Semantic (384d Dense Vector)';
+  if (alpha < 0.4) return 'Lexical-Biased Hybrid RRF';
+  if (alpha > 0.6) return 'Semantic-Biased Hybrid RRF';
+  return 'Balanced Hybrid RRF (BM25 + Dense)';
+}
+
+export function queryEdgeHybridRag(
+  query: string,
+  topK = 3,
+  minConfidence = 0.22,
+  alpha = 0.5
+): RagQueryResponse {
   const t0 = performance.now();
+  const clampedAlpha = Number(Math.max(0, Math.min(1, alpha)).toFixed(2));
+  const fusionMode = describeFusionMode(clampedAlpha);
   const qTokens = tokenize(query);
+
   if (qTokens.length === 0) {
     return {
       query,
@@ -268,6 +285,9 @@ export function queryEdgeHybridRag(query: string, topK = 3, minConfidence = 0.22
       latency_ms: Number((performance.now() - t0).toFixed(3)),
       synthesized_answer: 'Please enter a distributed systems, .NET, SQL/Dapper, Redis, or Applied AI question.',
       citations: [],
+      alpha: clampedAlpha,
+      fusion_mode: fusionMode,
+      evaluated_chunks: [],
     };
   }
 
@@ -302,22 +322,56 @@ export function queryEdgeHybridRag(query: string, topK = 3, minConfidence = 0.22
   denseOrder.forEach((docIdx, r) => (denseRank[docIdx] = r + 1));
 
   const rrfK = 60;
-  const maxRrf = 2 / (rrfK + 1);
+  const wLexRrf = (1 - clampedAlpha) * 2;
+  const wDenseRrf = clampedAlpha * 2;
+  const maxRrf = (wLexRrf + wDenseRrf) / (rrfK + 1); // == 2 / 61 for all alpha
+
+  // Smoothly interpolate calibration weights:
+  // alpha=0.0 -> (0.85 lex, 0.00 dense), alpha=0.5 -> (0.45 lex, 0.40 dense), alpha=1.0 -> (0.00 lex, 0.85 dense)
+  const wLexCal =
+    clampedAlpha <= 0.5
+      ? 0.85 * (1 - clampedAlpha / 0.5) + 0.45 * (clampedAlpha / 0.5)
+      : 0.45 * (1 - (clampedAlpha - 0.5) / 0.5);
+  const wDenseCal =
+    clampedAlpha <= 0.5
+      ? 0.4 * (clampedAlpha / 0.5)
+      : 0.4 * (1 - (clampedAlpha - 0.5) / 0.5) + 0.85 * ((clampedAlpha - 0.5) / 0.5);
+
   const uniqueQ = Array.from(new Set(qTokens));
   const lexHitRatio = uniqueQ.filter((qt) => DOC_FREQS[qt]).length / Math.max(1, uniqueQ.length);
 
   const scored = INDEXED_DOCS.map((item, i) => {
-    const rrf = 1 / (rrfK + bm25Rank[i]) + 1 / (rrfK + denseRank[i]);
-    const rrfUnit = rrf / maxRrf;
+    const rrf = wLexRrf / (rrfK + bm25Rank[i]) + wDenseRrf / (rrfK + denseRank[i]);
+    const rrfUnit = maxRrf > 0 ? rrf / maxRrf : 0;
+
+    const hasSignal =
+      clampedAlpha <= 0.05
+        ? bm25Raw[i] > 0
+        : clampedAlpha >= 0.95
+          ? denseRaw[i] > 0.22
+          : bm25Raw[i] > 0 || denseRaw[i] > 0.22;
+
     const calibrated =
-      0.45 * (bm25Norm[i] * lexHitRatio) +
-      0.4 * denseRaw[i] +
-      (bm25Raw[i] > 0 || denseRaw[i] > 0.22 ? 0.15 * rrfUnit : 0);
+      wLexCal * (bm25Norm[i] * lexHitRatio) +
+      wDenseCal * denseRaw[i] +
+      (hasSignal ? 0.15 * rrfUnit : 0);
+
+    const matchedTerms = uniqueQ.filter(
+      (qt) =>
+        item.tokenSet.has(qt) ||
+        item.doc.tags.some((tg) => tg.includes(qt) || qt.includes(tg))
+    );
+
     return {
       doc: item.doc,
       bm25_score: Number(bm25Raw[i].toFixed(4)),
+      bm25_norm: Number(bm25Norm[i].toFixed(4)),
       dense_score: Number(denseRaw[i].toFixed(4)),
       rrf_score: Number(rrf.toFixed(5)),
+      bm25_rank: bm25Rank[i],
+      dense_rank: denseRank[i],
+      matched_terms: matchedTerms.slice(0, 8),
+      snippet: `${item.doc.symptoms} ${item.doc.root_cause}`,
       confidence: Number(Math.min(0.99, calibrated).toFixed(4)),
     };
   }).sort((a, b) => b.confidence - a.confidence || b.rrf_score - a.rrf_score);
@@ -325,36 +379,52 @@ export function queryEdgeHybridRag(query: string, topK = 3, minConfidence = 0.22
   const top = scored[0];
   const elapsed = Number(Math.max(0.42, performance.now() - t0).toFixed(3));
 
-  if ((top.bm25_score === 0 && top.dense_score < 0.24) || top.confidence < minConfidence) {
+  const toCitation = (x: (typeof scored)[number]): RagCitation => ({
+    doc_id: x.doc.doc_id,
+    title: x.doc.title,
+    category: x.doc.category,
+    severity_tier: x.doc.severity_tier,
+    bm25_score: x.bm25_score,
+    bm25_norm: x.bm25_norm,
+    dense_score: x.dense_score,
+    rrf_score: x.rrf_score,
+    bm25_rank: x.bm25_rank,
+    dense_rank: x.dense_rank,
+    matched_terms: x.matched_terms,
+    snippet: x.snippet,
+    confidence: x.confidence,
+    expected_impact: x.doc.expected_impact,
+    reference_code: x.doc.reference_code,
+    code_language: x.doc.code_language,
+  });
+
+  const evaluatedChunks = scored.slice(0, 5).map(toCitation);
+
+  const lexicalRequiredFailed = clampedAlpha <= 0.1 && top.bm25_score === 0;
+  const oodFailed = (top.bm25_score === 0 && top.dense_score < 0.24) || top.confidence < minConfidence;
+
+  if (lexicalRequiredFailed || oodFailed) {
     return {
       query,
       abstained: true,
-      abstention_reason: `Top fused confidence (${(top.confidence * 100).toFixed(1)}%) is below groundedness gate (${(minConfidence * 100).toFixed(0)}%) — query is outside production SRE / .NET / SQL / AI runbook scope.`,
+      abstention_reason: lexicalRequiredFailed
+        ? `Pure Lexical mode (alpha=${clampedAlpha.toFixed(2)}) detected 0 exact BM25 token matches in corpus. Increase alpha toward Semantic Dense or refine technical identifiers.`
+        : `Top fused confidence (${(top.confidence * 100).toFixed(1)}%) is below groundedness gate (${(minConfidence * 100).toFixed(0)}%) — query is outside production SRE / .NET / SQL / AI runbook scope.`,
       confidence: top.confidence,
       latency_ms: elapsed,
       synthesized_answer:
-        'ABSTAINED (Zero-Hallucination Guardrail Active): No verified runbook in the engineering corpus supports this query. System strictly abstains rather than generating ungrounded speculation.',
+        'ABSTAINED (Zero-Hallucination Guardrail Active): No verified runbook in the engineering corpus meets the groundedness threshold for this query. System strictly abstains rather than generating ungrounded speculation.',
       citations: [],
+      alpha: clampedAlpha,
+      fusion_mode: fusionMode,
+      evaluated_chunks: evaluatedChunks,
     };
   }
 
   const chosen = scored.slice(0, topK).filter((x) => x.confidence >= minConfidence * 0.65);
   const primary = chosen[0].doc;
   const badges = chosen.map((c) => `[${c.doc.doc_id}]`).join(' ');
-
-  const citations: RagCitation[] = chosen.map((x) => ({
-    doc_id: x.doc.doc_id,
-    title: x.doc.title,
-    category: x.doc.category,
-    severity_tier: x.doc.severity_tier,
-    bm25_score: x.bm25_score,
-    dense_score: x.dense_score,
-    rrf_score: x.rrf_score,
-    confidence: x.confidence,
-    expected_impact: x.doc.expected_impact,
-    reference_code: x.doc.reference_code,
-    code_language: x.doc.code_language,
-  }));
+  const citations: RagCitation[] = chosen.map(toCitation);
 
   return {
     query,
@@ -364,6 +434,9 @@ export function queryEdgeHybridRag(query: string, topK = 3, minConfidence = 0.22
     latency_ms: elapsed,
     synthesized_answer: `Grounded Synthesis ${badges} — ${primary.title}\n• Root Cause: ${primary.root_cause}\n• Playbook:\n${primary.playbook}\n• Expected Production Impact: ${primary.expected_impact}`,
     citations,
+    alpha: clampedAlpha,
+    fusion_mode: fusionMode,
+    evaluated_chunks: evaluatedChunks,
   };
 }
 
@@ -399,7 +472,7 @@ export function diagnoseEdgeTelemetry(snap: TelemetrySnapshot, throughputRps: nu
   }
 
   const ragQuery = searchParts.slice(0, 2).join(' ');
-  const ragRes = queryEdgeHybridRag(ragQuery, 3);
+  const ragRes = queryEdgeHybridRag(ragQuery, 3, 0.22, 0.5);
   const primary = ragRes.citations[0];
 
   const protectedUsd = Number(((snap.overAllocatedUnits > 0 ? snap.overAllocatedUnits : Math.max(15, throughputRps * 0.004)) * avgOrderUsd).toFixed(2));

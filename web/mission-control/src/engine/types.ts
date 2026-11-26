@@ -11,11 +11,25 @@ export type OrderOutcomeStatus =
 
 export type CircuitState = 'Closed' | 'Open' | 'HalfOpen';
 
+export type ThemeMode = 'dark' | 'light';
+
 export interface ChaosProfile {
   injectedDbLatencyMs: number;
   failureRatePercent: number;
   forceCircuitOpen: boolean;
   cacheStampedeActive: boolean;
+}
+
+export interface StressPreset {
+  id: string;
+  label: string;
+  shortLabel: string;
+  subtitle: string;
+  concurrentRequests: number;
+  initialStock: number;
+  duplicateReplayRatio: number;
+  recommendedMode: ConcurrencyMode;
+  chaos: ChaosProfile;
 }
 
 export interface TraceSpan {
@@ -42,6 +56,29 @@ export interface TransactionReceipt {
   mode: ConcurrencyMode;
   timestampUtc: string;
   spans: TraceSpan[];
+}
+
+export interface LatencyHistogramBucket {
+  label: string;
+  minUs: number;
+  maxUs: number;
+  count: number;
+  pct: number;
+  hasP50: boolean;
+  hasP95: boolean;
+  hasP99: boolean;
+}
+
+export interface StageTelemetry {
+  id: string;
+  index: number;
+  title: string;
+  subtitle: string;
+  metric: string;
+  utilizationPct: number;
+  queueDepthSparkline: number[];
+  status: 'healthy' | 'warning' | 'critical';
+  accentColor: string;
 }
 
 export interface TelemetrySnapshot {
@@ -76,6 +113,8 @@ export interface BurstSimulationResult {
   throughputRps: number;
   snapshot: TelemetrySnapshot;
   sampledTraces: TransactionReceipt[];
+  latencyHistogram?: LatencyHistogramBucket[];
+  stageTelemetry?: StageTelemetry[];
 }
 
 export interface RagCitation {
@@ -90,6 +129,11 @@ export interface RagCitation {
   expected_impact: string;
   reference_code: string;
   code_language: string;
+  bm25_norm?: number;
+  bm25_rank?: number;
+  dense_rank?: number;
+  matched_terms?: string[];
+  snippet?: string;
 }
 
 export interface RagQueryResponse {
@@ -100,6 +144,9 @@ export interface RagQueryResponse {
   latency_ms: number;
   synthesized_answer: string;
   citations: RagCitation[];
+  alpha?: number;
+  fusion_mode?: string;
+  evaluated_chunks?: RagCitation[];
 }
 
 export interface ReActStep {

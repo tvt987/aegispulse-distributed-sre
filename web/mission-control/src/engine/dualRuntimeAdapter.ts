@@ -1,5 +1,5 @@
 import { diagnoseEdgeTelemetry, queryEdgeHybridRag } from './localHybridRag';
-import { runEdgeBurstSimulation } from './localKernel';
+import { hydrateBurstTelemetry, runEdgeBurstSimulation } from './localKernel';
 import type {
   BurstSimulationResult,
   ChaosProfile,
@@ -29,11 +29,21 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs =
 }
 
 export async function detectPolyglotBackends(): Promise<BackendConnectionState> {
-  if (typeof window !== 'undefined' && window.location.hostname.endsWith('github.io')) {
+  const isProdBundle = Boolean(import.meta.env?.PROD);
+  const forceLiveProbe =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('live') === '1';
+
+  if (
+    typeof window !== 'undefined' &&
+    (window.location.hostname.endsWith('github.io') || (isProdBundle && !forceLiveProbe))
+  ) {
     return {
       dotnetLive: false,
       pythonLive: false,
-      modeLabel: 'EDGE DETERMINISTIC KERNEL (0ms Cold-Start · GitHub Pages CDN)',
+      modeLabel: window.location.hostname.endsWith('github.io')
+        ? 'EDGE KERNEL · GITHUB PAGES CDN'
+        : 'EDGE KERNEL · 0ms COLD-START',
     };
   }
 
@@ -57,8 +67,8 @@ export async function detectPolyglotBackends(): Promise<BackendConnectionState> 
     pythonLive,
     modeLabel:
       dotnetLive && pythonLive
-        ? 'LIVE POLYGLOT CLUSTER (.NET 10 Kestrel + Python FastAPI)'
-        : 'EDGE DETERMINISTIC KERNEL (In-Browser .NET/RAG Port · 0ms Cold-Start)',
+        ? 'LIVE CLUSTER · .NET 10 + FASTAPI'
+        : 'EDGE KERNEL · 0ms COLD-START',
   };
 }
 
@@ -88,7 +98,8 @@ export async function executeBurst(
         5000
       );
       if (resp.ok) {
-        return (await resp.json()) as BurstSimulationResult;
+        const liveRes = (await resp.json()) as BurstSimulationResult;
+        return hydrateBurstTelemetry(liveRes);
       }
     } catch {
       // Fallback cleanly to deterministic edge kernel
@@ -99,9 +110,12 @@ export async function executeBurst(
 
 export async function executeHybridRagSearch(
   query: string,
-  pythonLive: boolean
+  pythonLive: boolean,
+  alpha = 0.5
 ): Promise<RagQueryResponse> {
-  if (pythonLive) {
+  // Interactive alpha tuning executes deterministically in <2ms on the edge hybrid engine;
+  // when live Python FastAPI is connected at default balanced alpha=0.5, query live service first.
+  if (pythonLive && Math.abs(alpha - 0.5) < 0.001) {
     try {
       const resp = await fetchWithTimeout(
         `${PYTHON_URL}/api/v1/rag/query`,
@@ -113,13 +127,31 @@ export async function executeHybridRagSearch(
         3000
       );
       if (resp.ok) {
-        return (await resp.json()) as RagQueryResponse;
+        const liveRes = (await resp.json()) as RagQueryResponse;
+        const localDetail = queryEdgeHybridRag(query, 3, 0.22, alpha);
+        return {
+          ...liveRes,
+          alpha,
+          fusion_mode: localDetail.fusion_mode,
+          evaluated_chunks: localDetail.evaluated_chunks,
+          citations: liveRes.citations.map((c) => {
+            const match = localDetail.evaluated_chunks?.find((e) => e.doc_id === c.doc_id);
+            return {
+              ...c,
+              bm25_norm: match?.bm25_norm,
+              bm25_rank: match?.bm25_rank,
+              dense_rank: match?.dense_rank,
+              matched_terms: match?.matched_terms,
+              snippet: match?.snippet,
+            };
+          }),
+        };
       }
     } catch {
       // Fallback cleanly to deterministic edge Hybrid RAG
     }
   }
-  return queryEdgeHybridRag(query, 3, 0.22);
+  return queryEdgeHybridRag(query, 3, 0.22, alpha);
 }
 
 export async function executeSreDiagnosis(
