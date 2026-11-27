@@ -203,7 +203,7 @@ export function LivePacketTopologyCanvas({
     }
 
     function render(now: number) {
-      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      const dt = Math.max(0, Math.min(0.05, (now - lastTime) / 1000));
       lastTime = now;
 
       const state = telemetryRef.current;
@@ -510,9 +510,10 @@ export function LivePacketTopologyCanvas({
 
       // Draw Pulse Rings & Deflected Packets cleanly in open replay/rejection lanes
       for (const r of rings) {
+        if (r.radius <= 0) continue;
         ctx!.save();
         ctx!.beginPath();
-        ctx!.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
+        ctx!.arc(r.x, r.y, Math.max(0.5, r.radius), 0, Math.PI * 2);
         ctx!.strokeStyle = r.color;
         ctx!.globalAlpha = Math.max(0, r.alpha);
         ctx!.lineWidth = 1.6;

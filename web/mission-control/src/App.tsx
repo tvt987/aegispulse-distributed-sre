@@ -13,9 +13,12 @@ import {
   FileText,
   Flame,
   GitBranch,
+  Globe,
+  Languages,
   Layers,
   Moon,
   Play,
+  QrCode,
   RotateCcw,
   ShieldAlert,
   ShieldCheck,
@@ -27,8 +30,12 @@ import {
 } from 'lucide-react';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
 import { EngineRaceArena } from './components/EngineRaceArena';
+import { EnterpriseLicenseModal } from './components/EnterpriseLicenseModal';
 import { HybridRagPlayground, PRESET_RAG_QUERIES } from './components/HybridRagPlayground';
+import { IncidentRunbookExecutor } from './components/IncidentRunbookExecutor';
 import { LivePacketTopologyCanvas } from './components/LivePacketTopologyCanvas';
+import { LoadStressFlamegraph } from './components/LoadStressFlamegraph';
+import { MultiRegionRaftDeck } from './components/MultiRegionRaftDeck';
 import { TraceWaterfallPanel } from './components/TraceWaterfallPanel';
 import {
   EMPIRICAL_DOTNET_BENCHMARK,
@@ -53,8 +60,35 @@ import type {
   StressPreset,
   ThemeMode,
 } from './engine/types';
+import {
+  createInitialClusterState,
+  cutRegionFiber,
+  restoreAllRegions,
+  toggleDbConnectionExhaustion,
+  toggleRedisCacheStampede,
+  toggleTailLatency180Ms,
+  transferLeaderManually,
+  type ClusterTopologyState,
+  type RegionId,
+} from './engines/chaosEngine';
+import {
+  simulateLoadStressProfile,
+  type RuntimeProfilerMode,
+} from './engines/loadProfilerEngine';
+import {
+  createInitialRunbookState,
+  downloadUtf8BomFile,
+  executeAllRemainingSteps,
+  executeNextRunbookStep,
+  executeRunbookStep,
+  exportRunbookPostMortemJson,
+  exportRunbookPostMortemMarkdown,
+  type RunbookState,
+  type RunbookStepId,
+} from './engines/runbookEngine';
+import { UI_COPY, type LangMode } from './i18n/translations';
 
-type ActiveTab = 'arena' | 'sre-rag' | 'traces' | 'benchmarks' | 'roi';
+type ActiveTab = 'raft' | 'arena' | 'sre-rag' | 'traces' | 'benchmarks' | 'roi';
 
 const ZERO_CHAOS: ChaosProfile = {
   injectedDbLatencyMs: 0,
@@ -74,10 +108,36 @@ function readInitialTheme(): ThemeMode {
   return 'dark';
 }
 
+function readInitialLang(): LangMode {
+  if (typeof window === 'undefined') return 'en';
+  try {
+    const stored = window.localStorage.getItem('aegispulse-lang');
+    if (stored === 'vi' || stored === 'en') return stored;
+  } catch {
+    // Ignore storage read errors
+  }
+  return 'en';
+}
+
 export function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('arena');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('raft');
   const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
+  const [lang, setLang] = useState<LangMode>(readInitialLang);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [licenseModalOpen, setLicenseModalOpen] = useState(false);
+
+  // v3.0 Global Raft Quorum, Load Stress & Incident Runbook State
+  const [cluster, setCluster] = useState<ClusterTopologyState>(() => createInitialClusterState());
+  const [stressRps, setStressRps] = useState<number>(85000);
+  const [profilerRuntime, setProfilerRuntime] = useState<RuntimeProfilerMode>('dotnet10');
+  const [runbook, setRunbook] = useState<RunbookState>(() => createInitialRunbookState());
+
+  const loadProfile = useMemo(
+    () => simulateLoadStressProfile(stressRps, profilerRuntime, cluster),
+    [stressRps, profilerRuntime, cluster]
+  );
+
+  const uiCopy = UI_COPY[lang];
 
   const [conn, setConn] = useState<BackendConnectionState>({
     dotnetLive: false,
@@ -119,6 +179,16 @@ export function App() {
       // Ignore storage failures
     }
   }, [theme]);
+
+  // Sync language preference to <html lang> + localStorage
+  useEffect(() => {
+    document.documentElement.setAttribute('lang', lang);
+    try {
+      window.localStorage.setItem('aegispulse-lang', lang);
+    } catch {
+      // Ignore storage failures
+    }
+  }, [lang]);
 
   // Global Cmd+K / Ctrl+K shortcut for Command Palette
   useEffect(() => {
@@ -340,63 +410,177 @@ export function App() {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   }, []);
 
+  const toggleLang = useCallback(() => {
+    setLang((prev) => (prev === 'en' ? 'vi' : 'en'));
+  }, []);
+
+  // v3.0 Multi-Region Raft Chaos Handlers
+  const handleCutRegionFiber = useCallback((regionId: RegionId) => {
+    setCluster((prev) => cutRegionFiber(prev, regionId));
+  }, []);
+
+  const handleToggleTailLatency = useCallback(() => {
+    setCluster((prev) => toggleTailLatency180Ms(prev));
+  }, []);
+
+  const handleToggleRedisStampede = useCallback(() => {
+    setCluster((prev) => toggleRedisCacheStampede(prev));
+  }, []);
+
+  const handleToggleDbExhaustion = useCallback(() => {
+    setCluster((prev) => toggleDbConnectionExhaustion(prev));
+  }, []);
+
+  const handleRestoreAllRegions = useCallback(() => {
+    setCluster((prev) => restoreAllRegions(prev));
+  }, []);
+
+  const handleTransferLeader = useCallback((regionId: RegionId) => {
+    setCluster((prev) => transferLeaderManually(prev, regionId));
+  }, []);
+
+  // v3.0 SRE Incident Runbook Handlers (wired live to Chaos recovery)
+  const applyRunbookRemediation = useCallback(
+    (shouldRestoreCluster: boolean, shouldClearDbAndCacheFaults: boolean) => {
+      if (shouldRestoreCluster) {
+        setCluster((prev) => restoreAllRegions(prev));
+      } else if (shouldClearDbAndCacheFaults) {
+        setCluster((prev) => {
+          let next = prev;
+          if (next.faults.redisCacheStampede) next = toggleRedisCacheStampede(next);
+          if (next.faults.dbConnectionExhaustion) next = toggleDbConnectionExhaustion(next);
+          return next;
+        });
+      }
+    },
+    []
+  );
+
+  const handleExecuteRunbookStep = useCallback(
+    (stepId: RunbookStepId) => {
+      const res = executeRunbookStep(runbook, stepId, { cluster, loadProfile });
+      setRunbook(res.nextState);
+      applyRunbookRemediation(res.shouldRestoreCluster, res.shouldClearDbAndCacheFaults);
+    },
+    [runbook, cluster, loadProfile, applyRunbookRemediation]
+  );
+
+  const handleExecuteNextRunbook = useCallback(() => {
+    const res = executeNextRunbookStep(runbook, { cluster, loadProfile });
+    setRunbook(res.nextState);
+    applyRunbookRemediation(res.shouldRestoreCluster, res.shouldClearDbAndCacheFaults);
+  }, [runbook, cluster, loadProfile, applyRunbookRemediation]);
+
+  const handleExecuteAllRunbook = useCallback(() => {
+    const res = executeAllRemainingSteps(runbook, { cluster, loadProfile });
+    setRunbook(res.nextState);
+    applyRunbookRemediation(res.shouldRestoreCluster, res.shouldClearDbAndCacheFaults);
+  }, [runbook, cluster, loadProfile, applyRunbookRemediation]);
+
+  const handleResetRunbook = useCallback(() => {
+    setRunbook(createInitialRunbookState());
+  }, []);
+
+  const handleExportRunbookMd = useCallback(() => {
+    const md = exportRunbookPostMortemMarkdown(runbook, { cluster, loadProfile });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    downloadUtf8BomFile(`aegispulse-v3-runbook-${stamp}.md`, md, 'text/markdown');
+  }, [runbook, cluster, loadProfile]);
+
+  const handleExportRunbookJson = useCallback(() => {
+    const json = exportRunbookPostMortemJson(runbook, { cluster, loadProfile });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    downloadUtf8BomFile(`aegispulse-v3-runbook-${stamp}.json`, json, 'application/json');
+  }, [runbook, cluster, loadProfile]);
+
   // Command Palette registry
   const paletteCommands = useMemo<PaletteCommand[]>(
     () => [
       {
+        id: 'nav-raft',
+        group: 'Navigation',
+        title: '1. Global Raft & Chaos Control Plane (v3.0)',
+        subtitle: '5-region Raft quorum, fiber-cut chaos, 250K RPS flamegraph & SRE runbook',
+        keywords: 'raft quorum region fiber chaos load stress flamegraph runbook v3',
+        icon: Globe,
+        badge: activeTab === 'raft' ? 'ACTIVE' : 'TAB 1',
+        active: activeTab === 'raft',
+        onExecute: () => setActiveTab('raft'),
+      },
+      {
         id: 'nav-arena',
         group: 'Navigation',
-        title: '1. Concurrency & Chaos Arena',
+        title: '2. Concurrency & Packet Arena',
         subtitle: '60fps packet pipeline, 3-engine race arena, latency histogram',
         keywords: 'arena pipeline topology histogram race burst',
         icon: Flame,
-        badge: activeTab === 'arena' ? 'ACTIVE' : 'TAB 1',
+        badge: activeTab === 'arena' ? 'ACTIVE' : 'TAB 2',
         active: activeTab === 'arena',
         onExecute: () => setActiveTab('arena'),
       },
       {
         id: 'nav-sre-rag',
         group: 'Navigation',
-        title: '2. Agentic SRE & Hybrid RAG Playground',
+        title: '3. Agentic SRE & Hybrid RAG Playground',
         subtitle: 'ReAct diagnostics, RRF alpha slider, OOD abstention, post-mortem export',
         keywords: 'rag bm25 vector alpha sre diagnosis postmortem',
         icon: Bot,
-        badge: activeTab === 'sre-rag' ? 'ACTIVE' : 'TAB 2',
+        badge: activeTab === 'sre-rag' ? 'ACTIVE' : 'TAB 3',
         active: activeTab === 'sre-rag',
         onExecute: () => setActiveTab('sre-rag'),
       },
       {
         id: 'nav-traces',
         group: 'Navigation',
-        title: '3. OpenTelemetry Trace Waterfall',
+        title: '4. OpenTelemetry Trace Waterfall',
         subtitle: 'Inspect W3C microsecond span Gantt charts & RFC 9457 payloads',
         keywords: 'otel traceparent spans waterfall gantt 409 429 503',
         icon: Activity,
-        badge: activeTab === 'traces' ? 'ACTIVE' : 'TAB 3',
+        badge: activeTab === 'traces' ? 'ACTIVE' : 'TAB 4',
         active: activeTab === 'traces',
         onExecute: () => setActiveTab('traces'),
       },
       {
         id: 'nav-benchmarks',
         group: 'Navigation',
-        title: '4. Verified CI Benchmarks & Polyglot Code Vault',
+        title: '5. Verified CI Benchmarks & Polyglot Code Vault',
         subtitle: '.NET 10 release benchmarks, Python RAG evals, source code',
         keywords: 'ci benchmark dotnet python lua sql code vault',
         icon: FileCode2,
-        badge: activeTab === 'benchmarks' ? 'ACTIVE' : 'TAB 4',
+        badge: activeTab === 'benchmarks' ? 'ACTIVE' : 'TAB 5',
         active: activeTab === 'benchmarks',
         onExecute: () => setActiveTab('benchmarks'),
       },
       {
         id: 'nav-roi',
         group: 'Navigation',
-        title: '5. Executive ROI & Architect Hub',
-        subtitle: 'Flash-sale protection calculator & engineering dossier',
-        keywords: 'roi calculator cv resume architect contact',
+        title: '6. Executive ROI & License Hub',
+        subtitle: 'Flash-sale protection calculator, MBBank VietQR & architect dossier',
+        keywords: 'roi calculator cv resume architect contact license vietqr',
         icon: TrendingUp,
-        badge: activeTab === 'roi' ? 'ACTIVE' : 'TAB 5',
+        badge: activeTab === 'roi' ? 'ACTIVE' : 'TAB 6',
         active: activeTab === 'roi',
         onExecute: () => setActiveTab('roi'),
+      },
+      {
+        id: 'open-enterprise-license',
+        group: 'SRE & Appearance',
+        title: 'Commission Enterprise License (22.900.000 VND · MBBank VietQR)',
+        subtitle: 'Open live MBBank 970422 VietQR checkout & downloadable B2B quote',
+        keywords: 'license price buy checkout vietqr mbbank enterprise quote',
+        icon: QrCode,
+        badge: '22.9M',
+        onExecute: () => setLicenseModalOpen(true),
+      },
+      {
+        id: 'toggle-lang',
+        group: 'SRE & Appearance',
+        title: `Switch Interface Language to ${lang === 'en' ? 'Vietnamese (VI)' : 'English (EN)'}`,
+        subtitle: 'Toggle bilingual EN / VI Mission Control copy',
+        keywords: 'language english vietnamese vi en i18n',
+        icon: Languages,
+        badge: lang === 'en' ? 'VI' : 'EN',
+        onExecute: toggleLang,
       },
       {
         id: 'race-all-3',
@@ -520,11 +704,13 @@ export function App() {
       activePresetId,
       chaos,
       theme,
+      lang,
       handleThreeModeShowdown,
       handleRunBurst,
       handleApplyStressPreset,
       handleExportPostMortem,
       toggleTheme,
+      toggleLang,
     ]
   );
 
@@ -546,12 +732,19 @@ export function App() {
         commands={paletteCommands}
       />
 
+      {/* Enterprise License Quote & Live MBBank VietQR Checkout Modal */}
+      <EnterpriseLicenseModal
+        open={licenseModalOpen}
+        lang={lang}
+        onClose={() => setLicenseModalOpen(false)}
+      />
+
       {/* Top Command Header */}
       <header className="surface-header sticky top-0 z-30 border-b backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-500/40 bg-cyan-500/10 text-cyan-600 shadow-[0_0_20px_rgba(6,182,212,0.18)] dark:text-cyan-300">
-              <Zap className="h-5 w-5" />
+        <div className="mx-auto flex max-w-7xl flex-col gap-2.5 px-4 py-2.5 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-cyan-500/40 bg-cyan-500/10 text-cyan-600 shadow-[0_0_20px_rgba(6,182,212,0.18)] dark:text-cyan-300">
+              <Zap className="h-4.5 w-4.5" />
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -560,33 +753,50 @@ export function App() {
                 </span>
                 <span
                   data-testid="version-badge"
-                  className="rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300"
+                  className="rounded-full border border-cyan-500/40 bg-gradient-to-r from-cyan-500/15 to-emerald-500/15 px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300"
                 >
-                  V2.0 POLYGLOT ARCHITECTURE LAB
+                  {uiCopy.versionBadge}
                 </span>
               </div>
-              <p className="truncate text-xs text-dim">
-                High-Concurrency .NET 10 Kernel · 60fps Packet Telemetry · Hybrid BM25+Vector RRF SRE Co-Pilot
-              </p>
+              <p className="truncate text-xs text-dim">{uiCopy.headerSubtitle}</p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="hidden items-center gap-2 rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1.5 font-mono text-[10.5px] font-semibold text-emerald-700 dark:bg-emerald-950/35 dark:text-emerald-300 xl:flex">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500 dark:bg-emerald-400" />
-              {conn.modeLabel}
-            </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">
+            {/* Enterprise License & MBBank VietQR CTA */}
+            <button
+              type="button"
+              data-testid="btn-enterprise-license"
+              onClick={() => setLicenseModalOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 px-2.5 py-1.5 font-mono text-[11px] font-extrabold text-slate-950 shadow-md shadow-cyan-500/20 transition hover:brightness-110 sm:px-3 sm:text-xs"
+            >
+              <QrCode className="h-3.5 w-3.5 shrink-0" />
+              <span className="sm:hidden">{uiCopy.licenseBtnShort}</span>
+              <span className="hidden sm:inline">{uiCopy.licenseBtn}</span>
+            </button>
+
+            {/* Bilingual EN / VI Toggle */}
+            <button
+              type="button"
+              data-testid="btn-lang-toggle"
+              onClick={toggleLang}
+              className="surface-chip inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 font-mono text-[11px] font-bold text-body transition hover:border-cyan-500 hover:text-heading sm:px-2.5 sm:text-xs"
+              aria-label={`Switch language to ${lang === 'en' ? 'Vietnamese' : 'English'}`}
+            >
+              <Languages className="h-3.5 w-3.5 text-cyan-500" />
+              <span>{lang.toUpperCase()}</span>
+            </button>
 
             {/* Command Palette Trigger */}
             <button
               type="button"
               data-testid="btn-command-palette"
               onClick={() => setPaletteOpen(true)}
-              className="surface-chip inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-mono text-xs font-semibold text-body transition hover:border-cyan-500 hover:text-heading"
+              className="surface-chip inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 font-mono text-[11px] font-semibold text-body transition hover:border-cyan-500 hover:text-heading sm:px-2.5 sm:text-xs"
               aria-label="Open Command Palette"
             >
               <Command className="hidden h-3.5 w-3.5 text-cyan-500 sm:block" />
-              <span className="hidden sm:inline">Commands</span>
+              <span className="hidden xl:inline">{uiCopy.commandsBtn}</span>
               <kbd className="rounded border border-slate-400/40 px-1 py-0.2 text-[10px] text-dim">
                 ⌘K
               </kbd>
@@ -597,18 +807,18 @@ export function App() {
               type="button"
               data-testid="btn-theme-toggle"
               onClick={toggleTheme}
-              className="surface-chip inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-mono text-xs font-semibold text-body transition hover:border-cyan-500 hover:text-heading"
+              className="surface-chip inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 font-mono text-[11px] font-semibold text-body transition hover:border-cyan-500 hover:text-heading sm:px-2.5 sm:text-xs"
               aria-label={`Switch to ${theme === 'dark' ? 'Daylight Studio Light' : 'Obsidian Dark'} theme`}
             >
               {theme === 'dark' ? (
                 <>
                   <Sun className="h-3.5 w-3.5 text-amber-400" />
-                  <span className="hidden sm:inline">Daylight</span>
+                  <span className="hidden xl:inline">Daylight</span>
                 </>
               ) : (
                 <>
                   <Moon className="h-3.5 w-3.5 text-cyan-600" />
-                  <span className="hidden sm:inline">Obsidian</span>
+                  <span className="hidden xl:inline">Obsidian</span>
                 </>
               )}
             </button>
@@ -617,10 +827,10 @@ export function App() {
               href="https://github.com/tvt987/aegispulse-distributed-sre"
               target="_blank"
               rel="noreferrer"
-              className="surface-chip inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold text-body transition hover:border-cyan-500 hover:text-heading"
+              className="surface-chip hidden items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold text-body transition hover:border-cyan-500 hover:text-heading lg:inline-flex"
             >
               <GitBranch className="h-3.5 w-3.5" />
-              <span className="hidden md:inline">GitHub Source &amp; CI</span>
+              <span>{uiCopy.githubBtn}</span>
               <ExternalLink className="h-3 w-3" />
             </a>
           </div>
@@ -628,13 +838,14 @@ export function App() {
 
         {/* Navigation Bar */}
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
-          <nav className="flex gap-1 overflow-x-auto py-2" aria-label="Main Tabs">
+          <nav className="flex gap-1 overflow-x-auto py-1.5" aria-label="Main Tabs">
             {[
-              { id: 'arena', label: '1. Concurrency & Chaos Arena', icon: Flame },
-              { id: 'sre-rag', label: '2. Agentic SRE & Hybrid RAG', icon: Bot },
-              { id: 'traces', label: '3. OpenTelemetry Waterfall', icon: Activity },
-              { id: 'benchmarks', label: '4. Verified CI Benchmarks & Code', icon: FileCode2 },
-              { id: 'roi', label: '5. Executive ROI & Architect Hub', icon: TrendingUp },
+              { id: 'raft', label: uiCopy.tabs.raft, icon: Globe },
+              { id: 'arena', label: uiCopy.tabs.arena, icon: Flame },
+              { id: 'sre-rag', label: uiCopy.tabs.sreRag, icon: Bot },
+              { id: 'traces', label: uiCopy.tabs.traces, icon: Activity },
+              { id: 'benchmarks', label: uiCopy.tabs.benchmarks, icon: FileCode2 },
+              { id: 'roi', label: uiCopy.tabs.roi, icon: TrendingUp },
             ].map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -644,7 +855,7 @@ export function App() {
                   type="button"
                   data-testid={`tab-${tab.id}`}
                   onClick={() => setActiveTab(tab.id as ActiveTab)}
-                  className={`inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
+                  className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                     isActive
                       ? 'bg-cyan-500/15 text-cyan-700 ring-1 ring-cyan-500/50 dark:text-cyan-300'
                       : 'text-dim hover:bg-slate-500/10 hover:text-heading'
@@ -659,8 +870,47 @@ export function App() {
         </div>
       </header>
 
-      <main className="mx-auto mt-6 max-w-7xl px-4 sm:px-6">
-        {/* TAB 1: CONCURRENCY & CHAOS ARENA */}
+      <main className="mx-auto mt-4 max-w-7xl px-4 sm:px-6">
+        {/* TAB 1 (DEFAULT v3.0): GLOBAL 5-REGION RAFT CHAOS + 250K RPS FLAMEGRAPH + SRE RUNBOOK */}
+        {activeTab === 'raft' && (
+          <div className="space-y-6">
+            <MultiRegionRaftDeck
+              cluster={cluster}
+              lang={lang}
+              theme={theme}
+              onCutRegionFiber={handleCutRegionFiber}
+              onToggleTailLatency={handleToggleTailLatency}
+              onToggleRedisStampede={handleToggleRedisStampede}
+              onToggleDbExhaustion={handleToggleDbExhaustion}
+              onRestoreAll={handleRestoreAllRegions}
+              onTransferLeader={handleTransferLeader}
+            />
+
+            <LoadStressFlamegraph
+              telemetry={loadProfile}
+              targetRps={stressRps}
+              runtime={profilerRuntime}
+              lang={lang}
+              theme={theme}
+              onTargetRpsChange={setStressRps}
+              onRuntimeChange={setProfilerRuntime}
+            />
+
+            <IncidentRunbookExecutor
+              runbook={runbook}
+              currentLiveP99Ms={loadProfile.p99Ms}
+              lang={lang}
+              onExecuteStep={handleExecuteRunbookStep}
+              onExecuteNext={handleExecuteNextRunbook}
+              onExecuteAll={handleExecuteAllRunbook}
+              onReset={handleResetRunbook}
+              onExportMarkdown={handleExportRunbookMd}
+              onExportJson={handleExportRunbookJson}
+            />
+          </div>
+        )}
+
+        {/* TAB 2: CONCURRENCY & PACKET ARENA (v2.0 60FPS ENGINE PRESERVED) */}
         {activeTab === 'arena' && snap && simResult && (
           <div className="space-y-5">
             {/* Invariant Proof Hero Banner */}
@@ -1481,9 +1731,17 @@ export function App() {
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setLicenseModalOpen(true)}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 px-4 py-2.5 text-center text-xs font-extrabold text-slate-950 shadow-md shadow-cyan-500/20 transition hover:brightness-110"
+                >
+                  <QrCode className="h-4 w-4" />
+                  Commission Enterprise License · 22.900.000 VND (MBBank VietQR)
+                </button>
                 <a
                   href="mailto:tinhkun102@gmail.com?subject=Remote%20Engineering%20Opportunity%20-%20AegisPulse"
-                  className="flex-1 rounded-xl bg-cyan-500 px-4 py-2.5 text-center text-xs font-extrabold text-slate-950 transition hover:bg-cyan-400"
+                  className="flex-1 rounded-xl border border-cyan-500/45 bg-cyan-500/12 px-4 py-2.5 text-center text-xs font-extrabold text-cyan-800 transition hover:bg-cyan-500/22 dark:text-cyan-200"
                 >
                   Email: tinhkun102@gmail.com
                 </a>

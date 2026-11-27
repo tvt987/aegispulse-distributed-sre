@@ -2,11 +2,11 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
-export default defineConfig(({ mode }) => ({
-  base: mode === 'production' ? '/aegispulse-distributed-sre/' : '/',
+export default defineConfig({
+  base: './',
   plugins: [react(), tailwindcss()],
   build: {
     outDir: 'dist',
     sourcemap: false,
   },
-}));
+});
