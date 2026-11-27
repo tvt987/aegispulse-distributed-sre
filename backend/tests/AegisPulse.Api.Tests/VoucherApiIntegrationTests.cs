@@ -317,7 +317,7 @@ public sealed class VoucherApiIntegrationTests
         Assert.Equal(HttpStatusCode.OK, healthResp.StatusCode);
         var healthJson = await healthResp.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("healthy", healthJson.GetProperty("status").GetString());
-        Assert.Equal("5.0.0", healthJson.GetProperty("version").GetString());
+        Assert.Equal("6.0.0", healthJson.GetProperty("version").GetString());
         Assert.True(healthJson.GetProperty("invariantIntact").GetBoolean());
         Assert.Equal(0, healthJson.GetProperty("doubleSpendCount").GetInt32());
 

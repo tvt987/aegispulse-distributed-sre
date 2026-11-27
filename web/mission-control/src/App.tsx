@@ -1,10 +1,11 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
   Banknote,
   Bot,
   CheckCircle2,
+  ChevronDown,
   Command,
   Cpu,
   Database,
@@ -13,6 +14,7 @@ import {
   FileCode2,
   FileText,
   Flame,
+  Gauge,
   GitBranch,
   Globe,
   Languages,
@@ -85,6 +87,9 @@ import { UI_COPY, type LangMode } from './i18n/translations';
 const VoucherRaceArena = lazy(() =>
   import('./components/VoucherRaceArena').then((m) => ({ default: m.VoucherRaceArena }))
 );
+const RateLimiterLab = lazy(() =>
+  import('./components/RateLimiterLab').then((m) => ({ default: m.RateLimiterLab }))
+);
 const SqlPlanAdvisorLab = lazy(() =>
   import('./components/SqlPlanAdvisorLab').then((m) => ({ default: m.SqlPlanAdvisorLab }))
 );
@@ -124,6 +129,7 @@ const DEFAULT_RAG_QUERY =
 
 type ActiveTab =
   | 'voucher'
+  | 'ratelimit'
   | 'sql-plan'
   | 'quorum'
   | 'raft'
@@ -132,6 +138,14 @@ type ActiveTab =
   | 'traces'
   | 'benchmarks'
   | 'roi';
+
+const SECONDARY_TAB_IDS: ReadonlySet<ActiveTab> = new Set([
+  'arena',
+  'sre-rag',
+  'traces',
+  'benchmarks',
+  'roi',
+]);
 
 function ModuleLoadingFallback({ label }: { label: string }) {
   return (
@@ -176,6 +190,8 @@ export function App() {
   const [lang, setLang] = useState<LangMode>(readInitialLang);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [licenseModalOpen, setLicenseModalOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
 
   // v3.0 Global Raft Quorum, Load Stress & Incident Runbook State
   const [cluster, setCluster] = useState<ClusterTopologyState>(() => createInitialClusterState());
@@ -241,16 +257,27 @@ export function App() {
     }
   }, [lang]);
 
-  // Global Cmd+K / Ctrl+K shortcut for Command Palette
+  // Global Cmd+K / Ctrl+K shortcut for Command Palette + Escape to close More menu
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setPaletteOpen((prev) => !prev);
+      } else if (e.key === 'Escape') {
+        setMoreMenuOpen(false);
+      }
+    }
+    function handleOutsideClick(e: MouseEvent) {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
       }
     }
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
   }, []);
 
   // Initial Polyglot Discovery + Baseline Burst + 3-Engine Race + RAG Warmup
@@ -550,33 +577,44 @@ export function App() {
       {
         id: 'nav-voucher',
         group: 'Navigation',
-        title: '1. Con Cung 500-Request Voucher Race Arena',
+        title: 'Voucher 500x Race Arena (Con Cung Proof)',
         subtitle: '500 concurrent requests vs 1x 500K VND voucher: Naive leak vs UPDLOCK vs Redis Lua + ROWVERSION',
-        keywords: 'voucher race 500 concung redis lua rowversion dapper double spend lock v4 v5',
+        keywords: 'voucher race 500 concung redis lua rowversion dapper double spend lock v4 v5 v6',
         icon: Banknote,
-        badge: activeTab === 'voucher' ? 'ACTIVE' : 'TAB 1',
+        badge: activeTab === 'voucher' ? 'ACTIVE' : 'CORE',
         active: activeTab === 'voucher',
         onExecute: () => setActiveTab('voucher'),
       },
       {
+        id: 'nav-ratelimit',
+        group: 'Navigation',
+        title: 'Token-Bucket vs Sliding-Window Burst Rate-Limiter Lab (v6.0)',
+        subtitle: '5,000 RPS flash-sale gateway: expose Fixed-Window 2x overshoot vs Token Bucket vs 0-overshoot Redis Sliding-Window',
+        keywords: 'rate limiter token bucket sliding window fixed window 429 retry after backpressure burst spike v6',
+        icon: Gauge,
+        badge: activeTab === 'ratelimit' ? 'ACTIVE' : 'V6 NEW',
+        active: activeTab === 'ratelimit',
+        onExecute: () => setActiveTab('ratelimit'),
+      },
+      {
         id: 'nav-sql-plan',
         group: 'Navigation',
-        title: '2. SQL Server 5M-Row Execution Plan & Dapper Index Advisor (v5.0)',
+        title: 'SQL Server 5M-Row Execution Plan & Dapper Index Advisor',
         subtitle: 'Toggle EF Core Scan (28.4ms) -> Covering Index Dapper (1.8ms) -> Redis Lua (0.42ms)',
         keywords: 'sql server execution plan dapper covering index rowversion 5m rows logical reads v5',
         icon: Database,
-        badge: activeTab === 'sql-plan' ? 'ACTIVE' : 'V5 NEW',
+        badge: activeTab === 'sql-plan' ? 'ACTIVE' : 'CORE',
         active: activeTab === 'sql-plan',
         onExecute: () => setActiveTab('sql-plan'),
       },
       {
         id: 'nav-quorum',
         group: 'Navigation',
-        title: '3. 5-Region Raft Quorum & Split-Brain Failover Lab (v5.0)',
+        title: '5-Region Raft Quorum & Split-Brain Failover Lab',
         subtitle: 'Click VN-HCM / SG-1 / JP-Tokyo / US-East / EU-West to trigger leader election & READ_ONLY_FENCE',
         keywords: 'quorum raft failover split brain read only fence rpo rto wal lag v5',
         icon: ShieldCheck,
-        badge: activeTab === 'quorum' ? 'ACTIVE' : 'V5 NEW',
+        badge: activeTab === 'quorum' ? 'ACTIVE' : 'CORE',
         active: activeTab === 'quorum',
         onExecute: () => setActiveTab('quorum'),
       },
@@ -831,40 +869,43 @@ export function App() {
         </Suspense>
       )}
 
-      {/* Top Command Header */}
+      {/* Top Command Header — Datadog / Cloudflare Radar / Linear Visual Ergonomics */}
       <header className="surface-header sticky top-0 z-30 border-b backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl flex-col gap-2.5 px-4 py-2.5 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 flex-1 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-cyan-500/40 bg-cyan-500/10 text-cyan-600 shadow-[0_0_20px_rgba(6,182,212,0.18)] dark:text-cyan-300">
-              <Zap className="h-4.5 w-4.5" />
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-500/10 text-cyan-600 shadow-[0_0_20px_rgba(6,182,212,0.14)] dark:text-cyan-300">
+              <Zap className="h-4 w-4" />
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-base font-extrabold tracking-tight text-heading">
+                <span className="text-[15px] font-extrabold tracking-tight text-heading">
                   AegisPulse
                 </span>
                 <span
                   data-testid="version-badge"
-                  className="rounded-full border border-cyan-500/40 bg-gradient-to-r from-cyan-500/15 to-emerald-500/15 px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300"
+                  className="rounded-md border border-cyan-500/35 bg-cyan-500/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300"
                 >
                   {uiCopy.versionBadge}
                 </span>
               </div>
-              <p className="truncate text-xs text-dim">{uiCopy.headerSubtitle}</p>
+              <p className="truncate text-[11.5px] text-dim">{uiCopy.headerSubtitle}</p>
             </div>
           </div>
 
           <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">
-            {/* Enterprise License & MBBank VietQR CTA */}
+            {/* Command Palette Trigger */}
             <button
               type="button"
-              data-testid="btn-enterprise-license"
-              onClick={() => setLicenseModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 px-2.5 py-1.5 font-mono text-[11px] font-extrabold text-slate-950 shadow-md shadow-cyan-500/20 transition hover:brightness-110 sm:px-3 sm:text-xs"
+              data-testid="btn-command-palette"
+              onClick={() => setPaletteOpen(true)}
+              className="surface-chip inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-mono text-[11px] font-medium text-dim transition hover:border-cyan-500/60 hover:text-heading"
+              aria-label="Open Command Palette"
             >
-              <QrCode className="h-3.5 w-3.5 shrink-0" />
-              <span className="sm:hidden">{uiCopy.licenseBtnShort}</span>
-              <span className="hidden sm:inline">{uiCopy.licenseBtn}</span>
+              <Command className="h-3.5 w-3.5 text-cyan-500" />
+              <span className="hidden md:inline">{uiCopy.commandsBtn}</span>
+              <kbd className="rounded border border-slate-400/30 px-1 py-0.2 text-[10px] text-faint">
+                ⌘K
+              </kbd>
             </button>
 
             {/* Bilingual EN / VI Toggle */}
@@ -872,45 +913,30 @@ export function App() {
               type="button"
               data-testid="btn-lang-toggle"
               onClick={toggleLang}
-              className="surface-chip inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 font-mono text-[11px] font-bold text-body transition hover:border-cyan-500 hover:text-heading sm:px-2.5 sm:text-xs"
+              className="surface-chip inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 font-mono text-[11px] font-semibold text-body transition hover:border-cyan-500/60 hover:text-heading"
               aria-label={`Switch language to ${lang === 'en' ? 'Vietnamese' : 'English'}`}
             >
               <Languages className="h-3.5 w-3.5 text-cyan-500" />
               <span>{lang.toUpperCase()}</span>
             </button>
 
-            {/* Command Palette Trigger */}
-            <button
-              type="button"
-              data-testid="btn-command-palette"
-              onClick={() => setPaletteOpen(true)}
-              className="surface-chip inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 font-mono text-[11px] font-semibold text-body transition hover:border-cyan-500 hover:text-heading sm:px-2.5 sm:text-xs"
-              aria-label="Open Command Palette"
-            >
-              <Command className="hidden h-3.5 w-3.5 text-cyan-500 sm:block" />
-              <span className="hidden xl:inline">{uiCopy.commandsBtn}</span>
-              <kbd className="rounded border border-slate-400/40 px-1 py-0.2 text-[10px] text-dim">
-                ⌘K
-              </kbd>
-            </button>
-
-            {/* Obsidian Dark / Daylight Studio Theme Toggle */}
+            {/* Obsidian Dark / Crisp Daylight Theme Toggle */}
             <button
               type="button"
               data-testid="btn-theme-toggle"
               onClick={toggleTheme}
-              className="surface-chip inline-flex items-center gap-1.5 rounded-lg border px-2 py-1.5 font-mono text-[11px] font-semibold text-body transition hover:border-cyan-500 hover:text-heading sm:px-2.5 sm:text-xs"
+              className="surface-chip inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-mono text-[11px] font-semibold text-body transition hover:border-cyan-500/60 hover:text-heading"
               aria-label={`Switch to ${theme === 'dark' ? 'Daylight Studio Light' : 'Obsidian Dark'} theme`}
             >
               {theme === 'dark' ? (
                 <>
                   <Sun className="h-3.5 w-3.5 text-amber-400" />
-                  <span className="hidden xl:inline">Daylight</span>
+                  <span className="hidden lg:inline">Daylight</span>
                 </>
               ) : (
                 <>
                   <Moon className="h-3.5 w-3.5 text-cyan-600" />
-                  <span className="hidden xl:inline">Obsidian</span>
+                  <span className="hidden lg:inline">Obsidian</span>
                 </>
               )}
             </button>
@@ -919,57 +945,182 @@ export function App() {
               href="https://github.com/tvt987/aegispulse-distributed-sre"
               target="_blank"
               rel="noreferrer"
-              className="surface-chip hidden items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold text-body transition hover:border-cyan-500 hover:text-heading lg:inline-flex"
+              className="surface-chip hidden items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11.5px] font-semibold text-body transition hover:border-cyan-500/60 hover:text-heading lg:inline-flex"
             >
               <GitBranch className="h-3.5 w-3.5" />
               <span>{uiCopy.githubBtn}</span>
-              <ExternalLink className="h-3 w-3" />
+              <ExternalLink className="h-3 w-3 opacity-70" />
             </a>
+
+            <span className="hidden h-5 w-px bg-slate-500/20 sm:block" aria-hidden="true" />
+
+            {/* Enterprise License & MBBank VietQR CTA */}
+            <button
+              type="button"
+              data-testid="btn-enterprise-license"
+              onClick={() => setLicenseModalOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 px-3 py-1.5 font-mono text-[11px] font-extrabold text-slate-950 shadow-sm shadow-cyan-500/20 transition hover:brightness-110"
+            >
+              <QrCode className="h-3.5 w-3.5 shrink-0" />
+              <span className="sm:hidden">{uiCopy.licenseBtnShort}</span>
+              <span className="hidden sm:inline">{uiCopy.licenseBtn}</span>
+            </button>
           </div>
         </div>
 
-        {/* Navigation Bar */}
-        <div className="mx-auto max-w-7xl px-4 sm:px-6">
-          <nav className="flex gap-1 overflow-x-auto py-1.5" aria-label="Main Tabs">
-            {[
-              { id: 'voucher', label: uiCopy.tabs.voucher, icon: Banknote },
-              { id: 'sql-plan', label: uiCopy.tabs.sqlPlan, icon: Database },
-              { id: 'quorum', label: uiCopy.tabs.quorum, icon: ShieldCheck },
-              { id: 'raft', label: uiCopy.tabs.raft, icon: Globe },
-              { id: 'arena', label: uiCopy.tabs.arena, icon: Flame },
-              { id: 'sre-rag', label: uiCopy.tabs.sreRag, icon: Bot },
-              { id: 'traces', label: uiCopy.tabs.traces, icon: Activity },
-              { id: 'benchmarks', label: uiCopy.tabs.benchmarks, icon: FileCode2 },
-              { id: 'roi', label: uiCopy.tabs.roi, icon: TrendingUp },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
-              return (
+        {/* Streamlined Workspace Navigation Rail: 5 Core Flagship Labs + Hairline + More Suites Popover */}
+        <div className="border-t border-hairline">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2 sm:px-6">
+            <div className="flex min-w-0 flex-1 items-center gap-2.5">
+              <nav
+                className="surface-inset no-scrollbar flex min-w-0 items-center gap-1 overflow-x-auto rounded-xl border p-1"
+                aria-label="Primary Flagship Labs"
+              >
+                {[
+                  { id: 'voucher' as ActiveTab, label: uiCopy.tabs.voucher, icon: Banknote, badge: null },
+                  { id: 'ratelimit' as ActiveTab, label: uiCopy.tabs.ratelimit, icon: Gauge, badge: 'v6' },
+                  { id: 'sql-plan' as ActiveTab, label: uiCopy.tabs.sqlPlan, icon: Database, badge: null },
+                  { id: 'quorum' as ActiveTab, label: uiCopy.tabs.quorum, icon: ShieldCheck, badge: null },
+                  { id: 'raft' as ActiveTab, label: uiCopy.tabs.raft, icon: Globe, badge: null },
+                ].map((tab) => {
+                  const Icon = tab.icon;
+                  const isActive = activeTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      data-testid={`tab-${tab.id}`}
+                      onClick={() => {
+                        setActiveTab(tab.id);
+                        setMoreMenuOpen(false);
+                      }}
+                      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                        isActive
+                          ? 'bg-cyan-500/15 text-cyan-700 shadow-xs ring-1 ring-cyan-500/45 dark:bg-cyan-400/14 dark:text-cyan-200'
+                          : 'text-dim hover:bg-slate-500/10 hover:text-heading'
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0" />
+                      <span>{tab.label}</span>
+                      {tab.badge && (
+                        <span className="rounded bg-cyan-500/20 px-1.5 py-0.2 font-mono text-[9.5px] font-bold uppercase text-cyan-700 dark:text-cyan-300">
+                          {tab.badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </nav>
+
+              <span className="hidden h-5 w-px shrink-0 bg-slate-500/20 md:block" aria-hidden="true" />
+
+              {/* Secondary Telemetry & Proof Suites Menu */}
+              <div ref={moreMenuRef} className="relative shrink-0">
                 <button
-                  key={tab.id}
                   type="button"
-                  data-testid={`tab-${tab.id}`}
-                  onClick={() => setActiveTab(tab.id as ActiveTab)}
-                  className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                    isActive
-                      ? 'bg-cyan-500/15 text-cyan-700 ring-1 ring-cyan-500/50 dark:text-cyan-300'
-                      : 'text-dim hover:bg-slate-500/10 hover:text-heading'
+                  data-testid="btn-more-labs"
+                  aria-expanded={moreMenuOpen}
+                  onClick={() => setMoreMenuOpen((prev) => !prev)}
+                  className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                    SECONDARY_TAB_IDS.has(activeTab)
+                      ? 'border-cyan-500/50 bg-cyan-500/14 text-cyan-700 dark:text-cyan-200'
+                      : 'surface-chip text-dim hover:border-cyan-500/45 hover:text-heading'
                   }`}
                 >
-                  <Icon className="h-3.5 w-3.5" />
-                  {tab.label}
+                  <Layers className="h-3.5 w-3.5 shrink-0 text-cyan-500" />
+                  <span className="hidden sm:inline">
+                    {activeTab === 'arena'
+                      ? uiCopy.tabs.arena
+                      : activeTab === 'sre-rag'
+                        ? uiCopy.tabs.sreRag
+                        : activeTab === 'traces'
+                          ? uiCopy.tabs.traces
+                          : activeTab === 'benchmarks'
+                            ? uiCopy.tabs.benchmarks
+                            : activeTab === 'roi'
+                              ? uiCopy.tabs.roi
+                              : uiCopy.moreLabsBtn}
+                  </span>
+                  <span className="sm:hidden">More</span>
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 transition-transform ${moreMenuOpen ? 'rotate-180' : ''}`}
+                  />
                 </button>
-              );
-            })}
-          </nav>
+
+                {moreMenuOpen && (
+                  <div
+                    data-testid="more-labs-menu"
+                    role="menu"
+                    aria-label="Additional SRE and Telemetry Suites"
+                    className="surface-panel absolute right-0 z-40 mt-2 w-60 rounded-xl border p-1.5 shadow-2xl"
+                  >
+                    <div className="px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-faint">
+                      Telemetry, RAG &amp; Executive Suites
+                    </div>
+                    {[
+                      { id: 'arena' as ActiveTab, label: uiCopy.tabs.arena, icon: Flame },
+                      { id: 'sre-rag' as ActiveTab, label: uiCopy.tabs.sreRag, icon: Bot },
+                      { id: 'traces' as ActiveTab, label: uiCopy.tabs.traces, icon: Activity },
+                      { id: 'benchmarks' as ActiveTab, label: uiCopy.tabs.benchmarks, icon: FileCode2 },
+                      { id: 'roi' as ActiveTab, label: uiCopy.tabs.roi, icon: TrendingUp },
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      const isActive = activeTab === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          role="menuitem"
+                          data-testid={`tab-${item.id}`}
+                          onClick={() => {
+                            setActiveTab(item.id);
+                            setMoreMenuOpen(false);
+                          }}
+                          className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold transition ${
+                            isActive
+                              ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-200'
+                              : 'text-body hover:bg-slate-500/10 hover:text-heading'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <Icon className="h-3.5 w-3.5 shrink-0 text-cyan-500" />
+                            <span>{item.label}</span>
+                          </span>
+                          {isActive && (
+                            <span className="h-1.5 w-1.5 rounded-full bg-cyan-500" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Subtle Executive Live Proof Indicator on Desktop */}
+            <div className="hidden shrink-0 items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/[0.07] px-3 py-1 font-mono text-[10.5px] font-semibold text-emerald-700 xl:inline-flex dark:text-emerald-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              <span>700+ Stores · 5,000+ RPS · 0.00% Leak</span>
+            </div>
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto mt-4 max-w-7xl px-4 sm:px-6">
+      <main className="mx-auto mt-6 max-w-7xl px-4 sm:mt-7 sm:px-6">
         {/* TAB 1: CON CUNG 500-REQUEST VOUCHER RACE-CONDITION SIMULATOR */}
         {activeTab === 'voucher' && (
           <Suspense fallback={<ModuleLoadingFallback label="Con Cung 500-Request Voucher Race Arena" />}>
-            <VoucherRaceArena lang={lang} />
+            <VoucherRaceArena
+              lang={lang}
+              onOpenRateLimiter={() => setActiveTab('ratelimit')}
+            />
+          </Suspense>
+        )}
+
+        {/* TAB 2 (NEW v6.0): TOKEN-BUCKET VS SLIDING-WINDOW BURST RATE-LIMITER LAB */}
+        {activeTab === 'ratelimit' && (
+          <Suspense fallback={<ModuleLoadingFallback label="Token-Bucket vs Sliding-Window Burst Rate-Limiter Lab" />}>
+            <RateLimiterLab lang={lang} theme={theme} />
           </Suspense>
         )}
 

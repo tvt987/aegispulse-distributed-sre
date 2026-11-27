@@ -1,11 +1,12 @@
 openapi: 3.1.0
 info:
   title: AegisPulse Distributed SRE & Voucher Concurrency API
-  version: 5.0.0
-  summary: High-Concurrency .NET 10 Voucher Redemption, SQL Server Plan Advisor & 5-Region Quorum SRE Control Plane
+  version: 6.0.0
+  summary: High-Concurrency .NET 10 Voucher Redemption, Burst Rate-Limiter Gateway, SQL 5M Plan Advisor & 5-Region Quorum SRE Control Plane
   description: |
-    Production OpenAPI 3.1 contract for AegisPulse v5.0 (`backend/src/AegisPulse.Api`),
+    Production OpenAPI 3.1 contract for AegisPulse v6.0 (`backend/src/AegisPulse.Api`),
     implementing Truong Van Tinh's Con Cung 700-Store / 5,000+ RPS architecture:
+    - Token-Bucket & Redis Sliding-Window Log gateway rate limiting (`POST /api/v1/ratelimit/simulate`) proving Fixed-Window 2x boundary overshoot vs 0-overshoot rolling caps
     - Single-threaded Redis Lua `EVALSHA` atomic quota gate
     - RFC `Idempotency-Key` SHA-256 payload fingerprinting & response replay cache
     - SQL Server `ROWVERSION` optimistic concurrency persistence & 5M-row covering-index plan advisor via Dapper
@@ -35,6 +36,8 @@ tags:
     description: 5,000,000-row SQL Server execution plan modeling & Dapper covering index DDL advisor
   - name: Cluster Quorum
     description: 5-Region Raft quorum failover & automatic READ_ONLY_FENCE split-brain evaluation
+  - name: Rate Limiter
+    description: Token-Bucket vs Redis Sliding-Window Log vs Fixed-Window 2x boundary spike backpressure simulation
 
 paths:
   /health:
@@ -288,6 +291,43 @@ paths:
                 $ref: '#/components/schemas/QuorumEvaluationResult'
         '400':
           description: Unknown region identifier or unsupported health state
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/v1/ratelimit/simulate:
+    post:
+      tags: [Rate Limiter]
+      operationId: simulateRateLimiter
+      summary: Simulate Fixed-Window vs Token-Bucket vs Redis Sliding-Window Log over a 20-second burst traffic profile
+      description: |
+        Deterministically simulates 40 x 500ms slots (20 seconds) of Con Cung 5,000 RPS flash-sale gateway traffic across
+        all three distributed rate-limiting algorithms:
+        - **Fixed Window Counter**: Exposes the 2.00x boundary reset leak when flash-sale bursts straddle window edges (`t=5.0s`, `t=13.0s`).
+        - **Token Bucket**: Absorbs controlled burst spikes up to `bucketCapacity` tokens, then smoothly paces at `refillRatePerSecond`.
+        - **Redis Sliding-Window Log**: Enforces strictly `0` boundary overshoot across every consecutive rolling 1,000ms window with RFC `Retry-After` headers.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RateLimitSimulateRequest'
+            example:
+              burstIntensityRps: 600
+              bucketCapacity: 240
+              refillRatePerSecond: 200
+              scenario: BoundaryFlashSpike
+              shardCount: 25
+      responses:
+        '200':
+          description: Deterministic 20-second comparison across Fixed Window, Token Bucket, and Redis Sliding-Window Log
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitSimulationResult'
+        '400':
+          description: Parameter outside supported slider bounds or unknown traffic scenario
           content:
             application/problem+json:
               schema:
@@ -908,3 +948,191 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/QuorumNodeSnapshot'
+
+    RateLimitSimulateRequest:
+      type: object
+      properties:
+        burstIntensityRps:
+          type: integer
+          minimum: 100
+          maximum: 1000
+          default: 600
+        bucketCapacity:
+          type: integer
+          minimum: 50
+          maximum: 400
+          default: 240
+        refillRatePerSecond:
+          type: integer
+          minimum: 50
+          maximum: 300
+          default: 200
+        scenario:
+          type: string
+          enum: [BoundaryFlashSpike, SustainedWave, OrganicPosTraffic]
+          default: BoundaryFlashSpike
+        shardCount:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 25
+
+    RateLimitSlotTelemetry:
+      type: object
+      required:
+        - slotIndex
+        - startSeconds
+        - endSeconds
+        - fixedWindowId
+        - isBoundaryCrossing
+        - isFlashSpikeSlot
+        - incomingRequests
+        - allowed200
+        - allowedWithinCap
+        - throttled429
+        - boundaryOvershoot
+        - rolling1sAllowed
+        - tokensRemainingAfter
+        - retryAfterMs
+      properties:
+        slotIndex:
+          type: integer
+        startSeconds:
+          type: number
+        endSeconds:
+          type: number
+        fixedWindowId:
+          type: integer
+        isBoundaryCrossing:
+          type: boolean
+        isFlashSpikeSlot:
+          type: boolean
+        incomingRequests:
+          type: integer
+        allowed200:
+          type: integer
+        allowedWithinCap:
+          type: integer
+        throttled429:
+          type: integer
+        boundaryOvershoot:
+          type: integer
+        rolling1sAllowed:
+          type: integer
+        tokensRemainingAfter:
+          type: number
+        retryAfterMs:
+          type: integer
+
+    RateLimitAlgorithmReport:
+      type: object
+      required:
+        - algorithmKey
+        - displayName
+        - totalIncoming
+        - totalAllowed200
+        - totalThrottled429
+        - totalBoundaryOvershoot
+        - peakRolling1sAllowed
+        - peakMultiplierVsLimit
+        - admissionRatePct
+        - throttleRatePct
+        - burstAbsorbedCount
+        - minTokensObserved
+        - finalTokensRemaining
+        - maxRetryAfterMs
+        - strictCapPreserved
+        - verdict
+        - slots
+      properties:
+        algorithmKey:
+          type: string
+          enum: [fixed-window, token-bucket, sliding-window-log]
+        displayName:
+          type: string
+        totalIncoming:
+          type: integer
+        totalAllowed200:
+          type: integer
+        totalThrottled429:
+          type: integer
+        totalBoundaryOvershoot:
+          type: integer
+        peakRolling1sAllowed:
+          type: integer
+        peakMultiplierVsLimit:
+          type: number
+        admissionRatePct:
+          type: number
+        throttleRatePct:
+          type: number
+        burstAbsorbedCount:
+          type: integer
+        minTokensObserved:
+          type: number
+        finalTokensRemaining:
+          type: number
+        maxRetryAfterMs:
+          type: integer
+        strictCapPreserved:
+          type: boolean
+        verdict:
+          type: string
+        slots:
+          type: array
+          items:
+            $ref: '#/components/schemas/RateLimitSlotTelemetry'
+
+    RateLimitSimulationResult:
+      type: object
+      required:
+        - durationSeconds
+        - slotDurationMs
+        - totalSlots
+        - scenario
+        - burstIntensityRps
+        - bucketCapacity
+        - refillRatePerSecond
+        - shardCount
+        - clusterGatewayCapRps
+        - clusterPeakFixedWindowRps
+        - clusterPeakSlidingWindowRps
+        - fixedWindow
+        - tokenBucket
+        - slidingWindowLog
+        - summaryVerdict
+      properties:
+        durationSeconds:
+          type: integer
+          example: 20
+        slotDurationMs:
+          type: integer
+          example: 500
+        totalSlots:
+          type: integer
+          example: 40
+        scenario:
+          type: string
+          enum: [BoundaryFlashSpike, SustainedWave, OrganicPosTraffic]
+        burstIntensityRps:
+          type: integer
+        bucketCapacity:
+          type: integer
+        refillRatePerSecond:
+          type: integer
+        shardCount:
+          type: integer
+        clusterGatewayCapRps:
+          type: integer
+        clusterPeakFixedWindowRps:
+          type: integer
+        clusterPeakSlidingWindowRps:
+          type: integer
+        fixedWindow:
+          $ref: '#/components/schemas/RateLimitAlgorithmReport'
+        tokenBucket:
+          $ref: '#/components/schemas/RateLimitAlgorithmReport'
+        slidingWindowLog:
+          $ref: '#/components/schemas/RateLimitAlgorithmReport'
+        summaryVerdict:
+          type: string

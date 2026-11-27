@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
+  ArrowRight,
   Banknote,
   CheckCircle2,
   Clock,
   Cpu,
   Database,
+  Gauge,
   Layers,
   Lock,
   Play,
@@ -15,7 +17,6 @@ import {
   ShieldCheck,
   Store,
   Trophy,
-  Zap,
 } from 'lucide-react';
 import {
   DEFAULT_CONCURRENT_REQUESTS,
@@ -35,6 +36,7 @@ import type { LangMode } from '../i18n/translations';
 
 interface VoucherRaceArenaProps {
   lang: LangMode;
+  onOpenRateLimiter?: () => void;
 }
 
 const ARCHITECTURE_ORDER: VoucherArchitectureMode[] = [
@@ -43,7 +45,7 @@ const ARCHITECTURE_ORDER: VoucherArchitectureMode[] = [
   'concung-lua-rowversion',
 ];
 
-export function VoucherRaceArena({ lang }: VoucherRaceArenaProps) {
+export function VoucherRaceArena({ lang, onOpenRateLimiter }: VoucherRaceArenaProps) {
   const [selectedMode, setSelectedMode] = useState<VoucherArchitectureMode>('concung-lua-rowversion');
   const [faceValueVnd, setFaceValueVnd] = useState<number>(DEFAULT_VOUCHER_FACE_VALUE_VND);
   const [storeCount, setStoreCount] = useState<number>(DEFAULT_RETAIL_STORE_COUNT);
@@ -163,52 +165,55 @@ export function VoucherRaceArena({ lang }: VoucherRaceArenaProps) {
   return (
     <section
       data-testid="voucher-race-arena"
-      className="min-w-0 space-y-5"
+      className="min-w-0 space-y-6"
       aria-label="500-Request Concurrent Voucher Race-Condition Simulator"
     >
-      {/* Hero Control Card */}
-      <div className="surface-panel min-w-0 rounded-2xl border p-4 sm:p-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      {/* Executive Production Proof Strip — Con Cung 700+ Stores · 5,000+ RPS · 0.00% Double-Spend */}
+      <div
+        data-testid="concung-hero-proof"
+        className="surface-panel min-w-0 rounded-2xl border p-5 sm:p-6"
+      >
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/40 bg-cyan-500/12 px-2.5 py-0.5 font-mono text-[10.5px] font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300">
-                <Zap className="h-3 w-3 shrink-0" />
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1 font-mono text-[10.5px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
                 {isVi
-                  ? 'BANG CHUNG PRODUCTION CON CUNG · 700+ SIEU THI · 5,000+ RPS'
-                  : 'CON CUNG PRODUCTION PROOF · 700+ STORES · 5,000+ RPS'}
+                  ? 'KIẾN TRÚC PRODUCTION CON CƯNG · ĐÃ KIỂM CHỨNG'
+                  : 'CON CUNG PRODUCTION ARCHITECTURE · VERIFIED PROOF'}
               </span>
-              <span className="surface-chip rounded-full border px-2.5 py-0.5 font-mono text-[10.5px] font-semibold text-dim">
-                Voucher: {activeResult.voucherCode} · Stock = 1 · {formatVndCurrency(faceValueVnd)}
+              <span className="surface-chip rounded-md border px-2.5 py-1 font-mono text-[10.5px] font-medium text-dim">
+                {activeResult.voucherCode} · Stock = 1 · {formatVndCurrency(faceValueVnd)}
               </span>
             </div>
 
-            <h1 className="mt-2 text-lg font-extrabold tracking-tight text-heading sm:text-xl">
+            <h1 className="mt-3 text-xl font-bold tracking-tight text-heading sm:text-2xl lg:text-[26px]">
               {isVi
-                ? 'Mo Phong 500 Request Tranh Chap Voucher Flash-Sale Dong Thoi'
-                : '500-Request Concurrent Flash-Sale Voucher Race-Condition Simulator'}
+                ? 'Đấu Trường Tranh Chấp Voucher Flash-Sale 500 Request Đồng Thời'
+                : 'Con Cung 700-Store Flash-Sale Voucher Concurrency Arena'}
             </h1>
-            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-dim sm:text-sm">
+            <p className="mt-2 max-w-3xl text-xs leading-relaxed text-dim sm:text-sm">
               {isVi
-                ? 'Ban 500 request thanh toan dong thoi vao 1 ma voucher 500.000 VND (ton kho = 1) de kiem chung truc tiep su khac biet giua Naive Read-Write, SQL UPDLOCK va kien truc Redis Lua + SQL Server ROWVERSION + Dapper.'
-                : 'Fire 500 simultaneous Flash-Sale checkout requests targeting a single 500,000 VND promo voucher (stock = 1) across 3 backend concurrency architectures to verify zero double-spending, tail latency, and 700-store financial protection.'}
+                ? 'Kiểm chứng trực tiếp 500 request thanh toán đồng thời vào 1 mã voucher 500.000 VND (tồn kho = 1) qua 3 kiến trúc backend: Naive Read-Write, SQL UPDLOCK và Redis Lua + SQL Server ROWVERSION + Dapper.'
+                : 'Fire 500 simultaneous flash-sale requests against a single 500,000 VND voucher (stock = 1) across 3 backend patterns — proving zero double-spending, sub-45ms tail latency, and nationwide 700-store financial protection.'}
             </p>
           </div>
 
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2.5">
             <button
               type="button"
               data-testid="btn-fire-500-voucher"
               disabled={isFiring}
               onClick={handleFire500Requests}
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 px-4 py-2.5 text-xs font-extrabold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:brightness-110 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 px-4 py-2.5 text-xs font-extrabold text-slate-950 shadow-md shadow-cyan-500/20 transition hover:brightness-110 disabled:opacity-60"
             >
               <Play className="h-3.5 w-3.5 fill-current" />
               {isFiring
                 ? isVi
-                  ? 'Dang Ban 500 Request...'
-                  : 'Firing 500 Concurrent Requests...'
+                  ? 'Đang Bắn 500 Request...'
+                  : 'Firing 500 Requests...'
                 : isVi
-                  ? 'Ban 500 Request Dong Thoi'
+                  ? 'Bắn 500 Request Đồng Thời'
                   : 'Fire 500 Concurrent Requests'}
             </button>
 
@@ -217,27 +222,74 @@ export function VoucherRaceArena({ lang }: VoucherRaceArenaProps) {
               data-testid="btn-race-all-voucher"
               disabled={isFiring}
               onClick={handleRaceAllThree}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/45 bg-amber-500/12 px-3.5 py-2.5 text-xs font-bold text-amber-800 transition hover:bg-amber-500/20 disabled:opacity-60 dark:text-amber-200"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3.5 py-2.5 text-xs font-bold text-amber-800 transition hover:bg-amber-500/18 disabled:opacity-60 dark:text-amber-200"
             >
               <Trophy className="h-3.5 w-3.5" />
-              {isVi ? 'So Tai Ca 3 Kien Truc' : 'Race All 3 Architectures'}
+              {isVi ? 'So Tài 3 Kiến Trúc' : 'Race All 3'}
             </button>
+
+            {onOpenRateLimiter && (
+              <button
+                type="button"
+                data-testid="btn-jump-ratelimit"
+                onClick={onOpenRateLimiter}
+                className="surface-chip inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2.5 text-xs font-semibold text-cyan-700 transition hover:border-cyan-500/60 hover:text-cyan-600 dark:text-cyan-300"
+              >
+                <Gauge className="h-3.5 w-3.5" />
+                <span>{isVi ? 'Lab Rate-Limiter v6' : 'Rate-Limiter Lab'}</span>
+                <ArrowRight className="h-3 w-3" />
+              </button>
+            )}
 
             <button
               type="button"
               data-testid="btn-reset-voucher"
               onClick={handleResetDefault}
-              className="surface-chip inline-flex items-center gap-1.5 rounded-xl border px-3 py-2.5 text-xs font-semibold text-body transition hover:border-cyan-500 hover:text-heading"
+              className="surface-chip inline-flex items-center gap-1.5 rounded-xl border px-3 py-2.5 text-xs font-semibold text-body transition hover:border-cyan-500/60 hover:text-heading"
               aria-label="Reset Voucher Simulator Defaults"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{isVi ? 'Mac Dinh' : 'Reset'}</span>
+              <span className="hidden sm:inline">{isVi ? 'Mặc Định' : 'Reset'}</span>
             </button>
           </div>
         </div>
 
+        {/* Unmistakable 4-Metric Flagship Hero Proof Grid */}
+        <div className="mt-5 grid grid-cols-2 gap-3 border-t border-hairline pt-5 lg:grid-cols-4">
+          <div className="surface-inset rounded-xl border p-4">
+            <div className="text-[11px] font-medium text-dim">Nationwide Retail Footprint</div>
+            <div className="mt-1.5 font-mono text-2xl font-bold tracking-tight text-heading tabular-nums">
+              {storeCount}+ Stores
+            </div>
+            <div className="mt-1 font-mono text-[11px] text-faint">Con Cung POS &amp; E-Commerce</div>
+          </div>
+          <div className="surface-inset rounded-xl border p-4">
+            <div className="text-[11px] font-medium text-dim">Sustained Peak Throughput</div>
+            <div className="mt-1.5 font-mono text-2xl font-bold tracking-tight text-cyan-600 tabular-nums dark:text-cyan-300">
+              5,000+ RPS
+            </div>
+            <div className="mt-1 font-mono text-[11px] text-faint">.NET 10 + Redis Lua Gate</div>
+          </div>
+          <div className="surface-inset rounded-xl border p-4">
+            <div className="text-[11px] font-medium text-dim">Voucher Double-Spend Rate</div>
+            <div className="mt-1.5 font-mono text-2xl font-bold tracking-tight text-emerald-600 tabular-nums dark:text-emerald-300">
+              0.00%
+            </div>
+            <div className="mt-1 font-mono text-[11px] text-faint">SQL ROWVERSION + Idempotency</div>
+          </div>
+          <div className="surface-inset rounded-xl border p-4">
+            <div className="text-[11px] font-medium text-dim">P99 Checkout Tail Latency</div>
+            <div className="mt-1.5 font-mono text-2xl font-bold tracking-tight text-heading tabular-nums">
+              {comparison.concung.p99Ms.toFixed(1)} ms
+            </div>
+            <div className="mt-1 font-mono text-[11px] text-emerald-600 dark:text-emerald-400">
+              SLO &lt; 45 ms · 1 SQL Write
+            </div>
+          </div>
+        </div>
+
         {/* 3 Selectable Backend Architectures */}
-        <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
           {ARCHITECTURE_ORDER.map((modeKey) => {
             const meta = VOUCHER_ARCHITECTURES[modeKey];
             const modeMetrics =
@@ -480,33 +532,33 @@ export function VoucherRaceArena({ lang }: VoucherRaceArenaProps) {
       </div>
 
       {/* 6-Card Live Telemetry Strip */}
-      <div data-testid="voucher-kpi-grid" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <div className="surface-panel rounded-xl border p-3.5">
+      <div data-testid="voucher-kpi-grid" className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="surface-panel rounded-2xl border p-4">
           <div className="flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-wider text-dim">
             <span>Approved (200)</span>
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
           </div>
           <div
             data-testid="voucher-approved-metric"
-            className={`mt-1 font-mono text-lg font-extrabold ${
+            className={`mt-1.5 font-mono text-xl font-bold tracking-tight tabular-nums ${
               isNaiveLeak ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-300'
             }`}
           >
             {activeResult.totalApproved200Count} / {activeResult.voucherStock}
           </div>
-          <div className="mt-0.5 font-mono text-[10.5px] text-faint">
+          <div className="mt-1 font-mono text-[10.5px] text-faint">
             {isNaiveLeak ? 'Exceeded cap!' : 'Exact stock cap'}
           </div>
         </div>
 
-        <div className="surface-panel rounded-xl border p-3.5">
+        <div className="surface-panel rounded-2xl border p-4">
           <div className="flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-wider text-dim">
             <span>Double-Spends</span>
             <Banknote className="h-3.5 w-3.5 text-rose-500" />
           </div>
           <div
             data-testid="voucher-double-spend-metric"
-            className={`mt-1 font-mono text-lg font-extrabold ${
+            className={`mt-1.5 font-mono text-xl font-bold tracking-tight tabular-nums ${
               activeResult.doubleSpentCount > 0
                 ? 'text-rose-600 dark:text-rose-400'
                 : 'text-emerald-600 dark:text-emerald-300'
@@ -514,34 +566,34 @@ export function VoucherRaceArena({ lang }: VoucherRaceArenaProps) {
           >
             {activeResult.doubleSpentCount} ({activeResult.doubleSpendRatePct.toFixed(2)}%)
           </div>
-          <div className="mt-0.5 font-mono text-[10.5px] text-faint">
+          <div className="mt-1 font-mono text-[10.5px] text-faint">
             {activeResult.doubleSpentCount > 0
               ? `Loss: ${formatVndCompact(activeResult.financial.singleVoucherLeakVnd)}`
               : '0.00% Financial Leak'}
           </div>
         </div>
 
-        <div className="surface-panel rounded-xl border p-3.5">
+        <div className="surface-panel rounded-2xl border p-4">
           <div className="flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-wider text-dim">
             <span>409 Conflict</span>
             <Layers className="h-3.5 w-3.5 text-cyan-500" />
           </div>
-          <div data-testid="voucher-rejected-metric" className="mt-1 font-mono text-lg font-extrabold text-heading">
+          <div data-testid="voucher-rejected-metric" className="mt-1.5 font-mono text-xl font-bold tracking-tight text-heading tabular-nums">
             {activeResult.rejected409Count}
           </div>
-          <div className="mt-0.5 font-mono text-[10.5px] text-faint">
+          <div className="mt-1 font-mono text-[10.5px] text-faint">
             {isConCung ? `${activeResult.redisEdgeRejections} shed at Redis` : 'Clean HTTP 409'}
           </div>
         </div>
 
-        <div className="surface-panel rounded-xl border p-3.5">
+        <div className="surface-panel rounded-2xl border p-4">
           <div className="flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-wider text-dim">
             <span>P99 Latency</span>
             <Clock className="h-3.5 w-3.5 text-amber-500" />
           </div>
           <div
             data-testid="voucher-p99-metric"
-            className={`mt-1 font-mono text-lg font-extrabold ${
+            className={`mt-1.5 font-mono text-xl font-bold tracking-tight tabular-nums ${
               activeResult.p99Ms > 100
                 ? 'text-amber-600 dark:text-amber-300'
                 : 'text-emerald-600 dark:text-emerald-300'
@@ -549,35 +601,35 @@ export function VoucherRaceArena({ lang }: VoucherRaceArenaProps) {
           >
             {activeResult.p99Ms.toFixed(1)} ms
           </div>
-          <div className="mt-0.5 font-mono text-[10.5px] text-faint">
+          <div className="mt-1 font-mono text-[10.5px] text-faint">
             P50: {activeResult.p50Ms.toFixed(1)}ms · P95: {activeResult.p95Ms.toFixed(1)}ms
           </div>
         </div>
 
-        <div className="surface-panel rounded-xl border p-3.5">
+        <div className="surface-panel rounded-2xl border p-4">
           <div className="flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-wider text-dim">
             <span>Throughput</span>
             <Activity className="h-3.5 w-3.5 text-cyan-500" />
           </div>
           <div
             data-testid="voucher-rps-metric"
-            className="mt-1 font-mono text-lg font-extrabold text-cyan-600 dark:text-cyan-300"
+            className="mt-1.5 font-mono text-xl font-bold tracking-tight text-cyan-600 tabular-nums dark:text-cyan-300"
           >
             {activeResult.throughputRps.toLocaleString()} RPS
           </div>
-          <div className="mt-0.5 font-mono text-[10.5px] text-faint">
+          <div className="mt-1 font-mono text-[10.5px] text-faint">
             {isConCung ? 'SLO >= 5,000 RPS' : 'Sub-SLO bottleneck'}
           </div>
         </div>
 
-        <div className="surface-panel rounded-xl border p-3.5">
+        <div className="surface-panel rounded-2xl border p-4">
           <div className="flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-wider text-dim">
             <span>SQL DB CPU</span>
             <Cpu className="h-3.5 w-3.5 text-sky-500" />
           </div>
           <div
             data-testid="voucher-dbcpu-metric"
-            className={`mt-1 font-mono text-lg font-extrabold ${
+            className={`mt-1.5 font-mono text-xl font-bold tracking-tight tabular-nums ${
               activeResult.dbCpuPct >= 85
                 ? 'text-rose-600 dark:text-rose-400'
                 : activeResult.dbCpuPct >= 50
@@ -587,7 +639,7 @@ export function VoucherRaceArena({ lang }: VoucherRaceArenaProps) {
           >
             {activeResult.dbCpuPct.toFixed(1)}%
           </div>
-          <div className="mt-0.5 font-mono text-[10.5px] text-faint">
+          <div className="mt-1 font-mono text-[10.5px] text-faint">
             SQL Queries: {activeResult.sqlQueriesExecuted.toLocaleString()}
           </div>
         </div>

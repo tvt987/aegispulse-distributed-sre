@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Serialization;
+using AegisPulse.Domain.RateLimiting;
 using AegisPulse.Domain.Sql;
 using AegisPulse.Domain.Sre;
 using AegisPulse.Domain.Vouchers;
@@ -28,6 +29,7 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton<RaftQuorumEvaluator>();
 builder.Services.AddSingleton<QuorumFailoverEvaluator>();
 builder.Services.AddSingleton<SqlExecutionPlanAdvisor>();
+builder.Services.AddSingleton<RateLimiterSimulator>();
 builder.Services.AddSingleton(sp =>
     new VoucherRedemptionEngine(
         circuitBreaker: sp.GetRequiredService<CircuitBreakerStateMachine>(),
@@ -50,9 +52,9 @@ app.MapGet("/health", (
     {
         status = raftStatus.HasQuorum && cb.State != CircuitBreakerState.Open ? "healthy" : "degraded",
         service = "aegispulse-api",
-        version = "5.0.0",
+        version = "6.0.0",
         runtime = $".NET {Environment.Version}",
-        architecture = "Redis Lua Atomic Gate + SQL Server ROWVERSION + Covering Index Dapper + 5-Region Raft",
+        architecture = "Token-Bucket & Redis Sliding-Window Gateway + Redis Lua Atomic Gate + SQL Server ROWVERSION + Covering Index Dapper + 5-Region Raft",
         raftQuorum = raftStatus.QuorumStatus,
         circuitBreaker = cb.State.ToString(),
         doubleSpendCount = metrics.TotalDoubleSpends,
@@ -194,7 +196,7 @@ app.MapGet("/api/v1/sre/cluster-status", (
     return Results.Ok(new
     {
         service = "aegispulse-sre-control-plane",
-        version = "5.0.0",
+        version = "6.0.0",
         raft = raftStatus,
         circuitBreaker = cbSnapshot,
         voucherEngine = new
@@ -299,6 +301,44 @@ app.MapPost("/api/v1/cluster/quorum-evaluate", (
     }
 });
 
+app.MapPost("/api/v1/ratelimit/simulate", (
+    [FromBody] RateLimitSimulateHttpRequest? request,
+    RateLimiterSimulator simulator) =>
+{
+    var burstIntensity = request?.BurstIntensityRps ?? RateLimiterSimulator.DefaultBurstIntensityRps;
+    var bucketCapacity = request?.BucketCapacity ?? RateLimiterSimulator.DefaultBucketCapacity;
+    var refillRate = request?.RefillRatePerSecond ?? RateLimiterSimulator.DefaultRefillRatePerSecond;
+    var shardCount = request?.ShardCount ?? RateLimiterSimulator.DefaultShardCount;
+
+    if (!TryParseRateLimitScenario(request?.Scenario, out var scenario))
+    {
+        return Results.Problem(
+            title: "Invalid Rate-Limit Traffic Scenario",
+            detail: $"Unsupported scenario '{request?.Scenario}'. Expected BoundaryFlashSpike, SustainedWave, or OrganicPosTraffic.",
+            statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    try
+    {
+        var result = simulator.Simulate(new RateLimitSimulationRequest(
+            BurstIntensityRps: burstIntensity,
+            BucketCapacity: bucketCapacity,
+            RefillRatePerSecond: refillRate,
+            Scenario: scenario,
+            ShardCount: shardCount
+        ));
+
+        return Results.Ok(result);
+    }
+    catch (ArgumentOutOfRangeException ex)
+    {
+        return Results.Problem(
+            title: "Invalid Rate-Limiter Parameter",
+            detail: ex.Message,
+            statusCode: StatusCodes.Status400BadRequest);
+    }
+});
+
 app.MapGet("/metrics", (
     VoucherRedemptionEngine engine,
     RaftQuorumEvaluator raft,
@@ -367,6 +407,14 @@ public sealed record ClusterQuorumEvaluateHttpRequest(
     Dictionary<string, string>? RegionStates = null
 );
 
+public sealed record RateLimitSimulateHttpRequest(
+    int? BurstIntensityRps = null,
+    int? BucketCapacity = null,
+    int? RefillRatePerSecond = null,
+    string? Scenario = null,
+    int? ShardCount = null
+);
+
 public partial class Program
 {
     private static bool TryParseSqlStage(string? raw, out SqlOptimizationStage stage)
@@ -429,5 +477,42 @@ public partial class Program
 
         state = default;
         return false;
+    }
+
+    private static bool TryParseRateLimitScenario(string? raw, out RateLimitTrafficScenario scenario)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            scenario = RateLimitTrafficScenario.BoundaryFlashSpike;
+            return true;
+        }
+
+        var normalized = raw.Trim().Replace("_", "").Replace("-", "").Replace(" ", "");
+        if (normalized.Equals("boundaryflashspike", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("boundaryspike", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("flashspike", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("2xspike", StringComparison.OrdinalIgnoreCase))
+        {
+            scenario = RateLimitTrafficScenario.BoundaryFlashSpike;
+            return true;
+        }
+
+        if (normalized.Equals("sustainedwave", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("sustained", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("wave", StringComparison.OrdinalIgnoreCase))
+        {
+            scenario = RateLimitTrafficScenario.SustainedWave;
+            return true;
+        }
+
+        if (normalized.Equals("organicpostraffic", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("organic", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("steady", StringComparison.OrdinalIgnoreCase))
+        {
+            scenario = RateLimitTrafficScenario.OrganicPosTraffic;
+            return true;
+        }
+
+        return Enum.TryParse(raw.Trim(), ignoreCase: true, out scenario);
     }
 }
