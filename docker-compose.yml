@@ -1,28 +1,107 @@
 services:
-  aegis-kernel-dotnet:
+  web:
     build:
-      context: ./services/aegis-kernel-dotnet
+      context: .
       dockerfile: Dockerfile
+    container_name: aegispulse-web
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aegispulse-api
     ports:
       - "5080:5080"
     environment:
       - ASPNETCORE_URLS=http://+:5080
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__Postgres=Host=postgres;Port=5432;Database=aegispulse;Username=aegis;Password=aegis_local_dev
+      - ConnectionStrings__Redis=redis:6379
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/5080 && printf \"GET /health HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && grep -q \"200 OK\" <&3'"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
 
-  aegis-sre-agent-python:
+  sre-agent-python:
     build:
       context: ./services/aegis-sre-agent-python
       dockerfile: Dockerfile
+    container_name: aegispulse-sre-agent
     ports:
       - "8090:8090"
+    restart: unless-stopped
 
-  mission-control-web:
-    image: node:22-alpine
-    working_dir: /app
-    volumes:
-      - ./web/mission-control:/app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+  postgres:
+    image: postgres:16-alpine
+    container_name: aegispulse-postgres
+    environment:
+      - POSTGRES_DB=aegispulse
+      - POSTGRES_USER=aegis
+      - POSTGRES_PASSWORD=aegis_local_dev
     ports:
-      - "5173:5173"
+      - "5432:5432"
+    volumes:
+      - aegis_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegis -d aegispulse"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: aegispulse-redis
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - aegis_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.114.0
+    container_name: aegispulse-otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./infra/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.0.0
+    container_name: aegispulse-prometheus
+    volumes:
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
     depends_on:
-      - aegis-kernel-dotnet
-      - aegis-sre-agent-python
+      - api
+      - otel-collector
+    restart: unless-stopped
+
+volumes:
+  aegis_pgdata:
+  aegis_redis:

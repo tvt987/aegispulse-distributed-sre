@@ -195,7 +195,7 @@ export function CommandPalette({ open, onClose, commands }: Props) {
             <span>↵ Execute</span>
             <span>Esc Close</span>
           </div>
-          <span>AegisPulse v3.0 Enterprise Command Bus</span>
+          <span>AegisPulse v4.0 Distributed SRE Command Bus</span>
         </div>
       </div>
     </div>

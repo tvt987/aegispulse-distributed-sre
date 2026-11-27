@@ -1,0 +1,548 @@
+openapi: 3.1.0
+info:
+  title: AegisPulse Distributed SRE & Voucher Concurrency API
+  version: 4.0.0
+  summary: High-Concurrency .NET 10 Voucher Redemption & Multi-Region SRE Control Plane
+  description: |
+    Production OpenAPI 3.1 contract for AegisPulse v4.0 (`backend/src/AegisPulse.Api`),
+    implementing Truong Van Tinh's Con Cung 700-Store / 5,000+ RPS architecture:
+    - Single-threaded Redis Lua `EVALSHA` atomic quota gate
+    - RFC `Idempotency-Key` SHA-256 payload fingerprinting & response replay cache
+    - SQL Server `ROWVERSION` optimistic concurrency persistence via Dapper
+    - 5-Region Raft Quorum health evaluation & Adaptive Circuit Breaker telemetry
+  contact:
+    name: Truong Van Tinh
+    email: tinhkun102@gmail.com
+    url: https://github.com/tvt987/aegispulse-distributed-sre
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: http://localhost:5080
+    description: Local .NET 10 Kestrel / Docker Compose API
+  - url: http://localhost:8080
+    description: Nginx Reverse Proxy (Docker Compose Web Gateway)
+
+tags:
+  - name: Health
+    description: Service liveness, readiness, and Prometheus metrics exposition
+  - name: Vouchers
+    description: Atomic high-concurrency promo voucher seeding, redemption, and audit proof
+  - name: SRE
+    description: 5-Region Raft quorum consensus and Adaptive Circuit Breaker telemetry
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      summary: Service health and zero-double-spend invariant check
+      responses:
+        '200':
+          description: Service health payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /metrics:
+    get:
+      tags: [Health]
+      operationId: getPrometheusMetrics
+      summary: Prometheus text exposition metrics endpoint
+      responses:
+        '200':
+          description: Prometheus exposition format (`text/plain; version=0.0.4`)
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /api/v1/vouchers/seed:
+    post:
+      tags: [Vouchers]
+      operationId: seedVoucher
+      summary: Create or reset a promo voucher campaign with exact initial stock
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SeedVoucherRequest'
+            example:
+              code: CONCUNG-VIP-500K
+              faceValueVnd: 500000
+              initialStock: 1
+              campaignName: Con Cung 700-Store Flash-Sale Promo
+      responses:
+        '201':
+          description: Voucher seeded and ready for atomic redemption
+          headers:
+            Location:
+              description: URI of the seeded voucher audit ledger
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoucherAuditSnapshot'
+        '400':
+          description: Validation error (empty code, non-positive stock or face value)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/v1/vouchers/{code}/redeem:
+    post:
+      tags: [Vouchers]
+      operationId: redeemVoucher
+      summary: Atomically redeem a promo voucher with strict Idempotency-Key deduplication
+      description: |
+        Executes the two-layer Con Cung concurrency guard:
+        1. Validates mandatory `Idempotency-Key` header (`400 Bad Request` if omitted).
+        2. Evaluates the Redis Lua atomic gate and SHA-256 idempotency response cache.
+        3. Commits the SQL Server `ROWVERSION` optimistic concurrency decrement.
+        4. Guarantees strictly `0.00%` double-spending across parallel flash-sale storms.
+      parameters:
+        - name: code
+          in: path
+          required: true
+          description: Promo voucher code (case-insensitive, normalized uppercase)
+          schema:
+            type: string
+            example: CONCUNG-VIP-500K
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Unique client-generated idempotency token preventing duplicate charges on retry
+          schema:
+            type: string
+            minLength: 1
+            example: cc-pos-store088-9b71c4a2
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RedeemVoucherRequest'
+            example:
+              customerId: cust-vip-8821
+              storeCode: STORE-088
+      responses:
+        '200':
+          description: Voucher atomically redeemed or safely replayed from idempotency cache
+          headers:
+            X-Idempotent-Replay:
+              description: '`true` when served from idempotency response cache, `false` for fresh commit'
+              schema:
+                type: string
+                enum: ['true', 'false']
+            X-RowVersion:
+              description: Monotonic 64-bit SQL Server ROWVERSION token hex string
+              schema:
+                type: string
+                example: '0x0000000000000002'
+            X-Latency-Us:
+              description: Server-side execution time in microseconds
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoucherRedemptionReceipt'
+        '400':
+          description: Missing or blank `Idempotency-Key` header
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Voucher code does not exist
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: Voucher exhausted (race lost cleanly), ROWVERSION conflict, or Idempotency-Key payload mismatch
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '503':
+          description: Adaptive Circuit Breaker is OPEN to protect downstream SQL Server pools
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/v1/vouchers/{code}/audit:
+    get:
+      tags: [Vouchers]
+      operationId: getVoucherAudit
+      summary: Retrieve immutable voucher stock invariant audit ledger
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+            example: CONCUNG-VIP-500K
+      responses:
+        '200':
+          description: Full voucher audit snapshot including doubleSpendCount and recent events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoucherAuditSnapshot'
+        '404':
+          description: Voucher code not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/v1/sre/cluster-status:
+    get:
+      tags: [SRE]
+      operationId: getSreClusterStatus
+      summary: Inspect 5-region Raft quorum health, circuit breaker state, and voucher SLO metrics
+      responses:
+        '200':
+          description: Live SRE control plane status snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SreClusterStatusResponse'
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - service
+        - version
+        - runtime
+        - architecture
+        - raftQuorum
+        - circuitBreaker
+        - doubleSpendCount
+        - invariantIntact
+        - timestampUtc
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded]
+        service:
+          type: string
+        version:
+          type: string
+        runtime:
+          type: string
+        architecture:
+          type: string
+        raftQuorum:
+          type: string
+        circuitBreaker:
+          type: string
+          enum: [Closed, Open, HalfOpen]
+        doubleSpendCount:
+          type: integer
+          minimum: 0
+        invariantIntact:
+          type: boolean
+        timestampUtc:
+          type: string
+          format: date-time
+
+    SeedVoucherRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          minLength: 1
+        faceValueVnd:
+          type: integer
+          format: int64
+          default: 500000
+          minimum: 1
+        initialStock:
+          type: integer
+          default: 1
+          minimum: 1
+        campaignName:
+          type: string
+          nullable: true
+
+    RedeemVoucherRequest:
+      type: object
+      properties:
+        customerId:
+          type: string
+          nullable: true
+        storeCode:
+          type: string
+          nullable: true
+
+    VoucherRedemptionReceipt:
+      type: object
+      required:
+        - redemptionId
+        - voucherCode
+        - customerId
+        - storeCode
+        - idempotencyKey
+        - faceValueVnd
+        - remainingStockAfter
+        - rowVersion
+        - rowVersionHex
+        - isIdempotentReplay
+        - outcome
+        - latencyMicroseconds
+        - redeemedAtUtc
+      properties:
+        redemptionId:
+          type: string
+        voucherCode:
+          type: string
+        customerId:
+          type: string
+        storeCode:
+          type: string
+        idempotencyKey:
+          type: string
+        faceValueVnd:
+          type: integer
+          format: int64
+        remainingStockAfter:
+          type: integer
+          minimum: 0
+        rowVersion:
+          type: integer
+          format: int64
+        rowVersionHex:
+          type: string
+        isIdempotentReplay:
+          type: boolean
+        outcome:
+          type: string
+          enum:
+            - Redeemed
+            - IdempotentReplay
+            - VoucherExhausted
+            - RowVersionConflict
+            - IdempotencyPayloadMismatch
+            - VoucherNotFound
+            - CircuitBreakerOpen
+        latencyMicroseconds:
+          type: integer
+          format: int64
+        redeemedAtUtc:
+          type: string
+          format: date-time
+
+    VoucherAuditEvent:
+      type: object
+      required:
+        - eventId
+        - eventType
+        - customerId
+        - storeCode
+        - idempotencyKey
+        - rowVersion
+        - remainingStockAfter
+        - timestampUtc
+      properties:
+        eventId:
+          type: string
+        eventType:
+          type: string
+        customerId:
+          type: string
+        storeCode:
+          type: string
+        idempotencyKey:
+          type: string
+        rowVersion:
+          type: integer
+          format: int64
+        remainingStockAfter:
+          type: integer
+        timestampUtc:
+          type: string
+          format: date-time
+
+    VoucherAuditSnapshot:
+      type: object
+      required:
+        - code
+        - campaignName
+        - faceValueVnd
+        - initialStock
+        - remainingStock
+        - approvedRedemptions
+        - rejectedConflicts409
+        - idempotentReplays
+        - rowVersionConflicts
+        - doubleSpendCount
+        - invariantIntact
+        - currentRowVersion
+        - currentRowVersionHex
+        - recentEvents
+      properties:
+        code:
+          type: string
+        campaignName:
+          type: string
+        faceValueVnd:
+          type: integer
+          format: int64
+        initialStock:
+          type: integer
+        remainingStock:
+          type: integer
+        approvedRedemptions:
+          type: integer
+        rejectedConflicts409:
+          type: integer
+        idempotentReplays:
+          type: integer
+        rowVersionConflicts:
+          type: integer
+        doubleSpendCount:
+          type: integer
+        invariantIntact:
+          type: boolean
+        currentRowVersion:
+          type: integer
+          format: int64
+        currentRowVersionHex:
+          type: string
+        recentEvents:
+          type: array
+          items:
+            $ref: '#/components/schemas/VoucherAuditEvent'
+
+    RaftRegionNode:
+      type: object
+      required: [regionId, displayName, baseLatencyMs, reachable, role, fencingToken]
+      properties:
+        regionId:
+          type: string
+        displayName:
+          type: string
+        baseLatencyMs:
+          type: integer
+        reachable:
+          type: boolean
+        role:
+          type: string
+          enum: [Leader, Follower, Partitioned, Fenced]
+        fencingToken:
+          type: integer
+          format: int64
+
+    SreClusterStatusResponse:
+      type: object
+      required: [service, version, raft, circuitBreaker, voucherEngine, slo, timestampUtc]
+      properties:
+        service:
+          type: string
+        version:
+          type: string
+        raft:
+          type: object
+          properties:
+            quorumStatus:
+              type: string
+            totalNodes:
+              type: integer
+            quorumRequired:
+              type: integer
+            reachableNodes:
+              type: integer
+            hasQuorum:
+              type: boolean
+            splitBrainWriteFenceActive:
+              type: boolean
+            leaderRegionId:
+              type: string
+              nullable: true
+            raftTerm:
+              type: integer
+              format: int64
+            regions:
+              type: array
+              items:
+                $ref: '#/components/schemas/RaftRegionNode'
+        circuitBreaker:
+          type: object
+          properties:
+            state:
+              type: string
+              enum: [Closed, Open, HalfOpen]
+            consecutiveFailures:
+              type: integer
+            failureThreshold:
+              type: integer
+            openCooldownSeconds:
+              type: number
+            openedAtUtc:
+              type: string
+              format: date-time
+              nullable: true
+        voucherEngine:
+          type: object
+          properties:
+            totalRequests:
+              type: integer
+              format: int64
+            totalApproved:
+              type: integer
+              format: int64
+            totalConflicts409:
+              type: integer
+              format: int64
+            totalIdempotentReplays:
+              type: integer
+              format: int64
+            totalDoubleSpends:
+              type: integer
+            doubleSpendRatePct:
+              type: number
+            invariantIntact:
+              type: boolean
+            activeVouchers:
+              type: integer
+        slo:
+          type: object
+          properties:
+            targetRps:
+              type: integer
+            targetP99Ms:
+              type: number
+            storeFootprint:
+              type: integer
+            pattern:
+              type: string
+        timestampUtc:
+          type: string
+          format: date-time
+
+    ProblemDetails:
+      type: object
+      description: RFC 9457 Problem Details error payload
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string

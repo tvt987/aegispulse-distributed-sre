@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
+  Banknote,
   Bot,
   CheckCircle2,
   Command,
@@ -28,15 +29,7 @@ import {
   Trophy,
   Zap,
 } from 'lucide-react';
-import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
-import { EngineRaceArena } from './components/EngineRaceArena';
-import { EnterpriseLicenseModal } from './components/EnterpriseLicenseModal';
-import { HybridRagPlayground, PRESET_RAG_QUERIES } from './components/HybridRagPlayground';
-import { IncidentRunbookExecutor } from './components/IncidentRunbookExecutor';
-import { LivePacketTopologyCanvas } from './components/LivePacketTopologyCanvas';
-import { LoadStressFlamegraph } from './components/LoadStressFlamegraph';
-import { MultiRegionRaftDeck } from './components/MultiRegionRaftDeck';
-import { TraceWaterfallPanel } from './components/TraceWaterfallPanel';
+import type { PaletteCommand } from './components/CommandPalette';
 import {
   EMPIRICAL_DOTNET_BENCHMARK,
   EMPIRICAL_PYTHON_RAG_EVAL,
@@ -88,7 +81,50 @@ import {
 } from './engines/runbookEngine';
 import { UI_COPY, type LangMode } from './i18n/translations';
 
-type ActiveTab = 'raft' | 'arena' | 'sre-rag' | 'traces' | 'benchmarks' | 'roi';
+// Code-split lazy modules so initial entry bundle stays lean and fast
+const VoucherRaceArena = lazy(() =>
+  import('./components/VoucherRaceArena').then((m) => ({ default: m.VoucherRaceArena }))
+);
+const MultiRegionRaftDeck = lazy(() =>
+  import('./components/MultiRegionRaftDeck').then((m) => ({ default: m.MultiRegionRaftDeck }))
+);
+const LoadStressFlamegraph = lazy(() =>
+  import('./components/LoadStressFlamegraph').then((m) => ({ default: m.LoadStressFlamegraph }))
+);
+const IncidentRunbookExecutor = lazy(() =>
+  import('./components/IncidentRunbookExecutor').then((m) => ({ default: m.IncidentRunbookExecutor }))
+);
+const LivePacketTopologyCanvas = lazy(() =>
+  import('./components/LivePacketTopologyCanvas').then((m) => ({ default: m.LivePacketTopologyCanvas }))
+);
+const EngineRaceArena = lazy(() =>
+  import('./components/EngineRaceArena').then((m) => ({ default: m.EngineRaceArena }))
+);
+const HybridRagPlayground = lazy(() =>
+  import('./components/HybridRagPlayground').then((m) => ({ default: m.HybridRagPlayground }))
+);
+const TraceWaterfallPanel = lazy(() =>
+  import('./components/TraceWaterfallPanel').then((m) => ({ default: m.TraceWaterfallPanel }))
+);
+const CommandPalette = lazy(() =>
+  import('./components/CommandPalette').then((m) => ({ default: m.CommandPalette }))
+);
+const EnterpriseLicenseModal = lazy(() =>
+  import('./components/EnterpriseLicenseModal').then((m) => ({ default: m.EnterpriseLicenseModal }))
+);
+
+const DEFAULT_RAG_QUERY =
+  'How to prevent flash-sale voucher double-spending and negative stock with Redis Lua and RowVersion?';
+
+type ActiveTab = 'voucher' | 'raft' | 'arena' | 'sre-rag' | 'traces' | 'benchmarks' | 'roi';
+
+function ModuleLoadingFallback({ label }: { label: string }) {
+  return (
+    <div className="surface-panel flex items-center justify-center rounded-2xl border p-8 font-mono text-xs text-dim">
+      <span>Loading {label}...</span>
+    </div>
+  );
+}
 
 const ZERO_CHAOS: ChaosProfile = {
   injectedDbLatencyMs: 0,
@@ -120,7 +156,7 @@ function readInitialLang(): LangMode {
 }
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('raft');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('voucher');
   const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
   const [lang, setLang] = useState<LangMode>(readInitialLang);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -156,9 +192,9 @@ export function App() {
   const [simResult, setSimResult] = useState<BurstSimulationResult | null>(null);
   const [showdownResults, setShowdownResults] = useState<BurstSimulationResult[] | null>(null);
 
-  // Tab 2: SRE Agent & Hybrid RAG State
+  // Tab 4: SRE Agent & Hybrid RAG State
   const [diagnosis, setDiagnosis] = useState<SreDiagnosisResponse | null>(null);
-  const [ragQuery, setRagQuery] = useState<string>(PRESET_RAG_QUERIES[0].q);
+  const [ragQuery, setRagQuery] = useState<string>(DEFAULT_RAG_QUERY);
   const [ragAlpha, setRagAlpha] = useState<number>(0.5);
   const [ragResult, setRagResult] = useState<RagQueryResponse | null>(null);
 
@@ -223,7 +259,7 @@ export function App() {
 
       const [initDiag, initRag] = await Promise.all([
         executeSreDiagnosis(primaryRun.snapshot, primaryRun.throughputRps, detected.pythonLive),
-        executeHybridRagSearch(PRESET_RAG_QUERIES[0].q, detected.pythonLive, 0.5),
+        executeHybridRagSearch(DEFAULT_RAG_QUERY, detected.pythonLive, 0.5),
       ]);
       if (!mounted) return;
       setDiagnosis(initDiag);
@@ -497,68 +533,79 @@ export function App() {
   const paletteCommands = useMemo<PaletteCommand[]>(
     () => [
       {
+        id: 'nav-voucher',
+        group: 'Navigation',
+        title: '1. Con Cung 500-Request Voucher Race Arena (v4.0)',
+        subtitle: '500 concurrent requests vs 1x 500K VND voucher: Naive leak vs UPDLOCK vs Redis Lua + ROWVERSION',
+        keywords: 'voucher race 500 concung redis lua rowversion dapper double spend lock v4',
+        icon: Banknote,
+        badge: activeTab === 'voucher' ? 'ACTIVE' : 'TAB 1',
+        active: activeTab === 'voucher',
+        onExecute: () => setActiveTab('voucher'),
+      },
+      {
         id: 'nav-raft',
         group: 'Navigation',
-        title: '1. Global Raft & Chaos Control Plane (v3.0)',
+        title: '2. Global Raft & Chaos Control Plane',
         subtitle: '5-region Raft quorum, fiber-cut chaos, 250K RPS flamegraph & SRE runbook',
         keywords: 'raft quorum region fiber chaos load stress flamegraph runbook v3',
         icon: Globe,
-        badge: activeTab === 'raft' ? 'ACTIVE' : 'TAB 1',
+        badge: activeTab === 'raft' ? 'ACTIVE' : 'TAB 2',
         active: activeTab === 'raft',
         onExecute: () => setActiveTab('raft'),
       },
       {
         id: 'nav-arena',
         group: 'Navigation',
-        title: '2. Concurrency & Packet Arena',
+        title: '3. Concurrency & Packet Arena',
         subtitle: '60fps packet pipeline, 3-engine race arena, latency histogram',
         keywords: 'arena pipeline topology histogram race burst',
         icon: Flame,
-        badge: activeTab === 'arena' ? 'ACTIVE' : 'TAB 2',
+        badge: activeTab === 'arena' ? 'ACTIVE' : 'TAB 3',
         active: activeTab === 'arena',
         onExecute: () => setActiveTab('arena'),
       },
       {
         id: 'nav-sre-rag',
         group: 'Navigation',
-        title: '3. Agentic SRE & Hybrid RAG Playground',
+        title: '4. Agentic SRE & Hybrid RAG Playground',
         subtitle: 'ReAct diagnostics, RRF alpha slider, OOD abstention, post-mortem export',
         keywords: 'rag bm25 vector alpha sre diagnosis postmortem',
         icon: Bot,
-        badge: activeTab === 'sre-rag' ? 'ACTIVE' : 'TAB 3',
+        badge: activeTab === 'sre-rag' ? 'ACTIVE' : 'TAB 4',
         active: activeTab === 'sre-rag',
         onExecute: () => setActiveTab('sre-rag'),
       },
       {
         id: 'nav-traces',
         group: 'Navigation',
-        title: '4. OpenTelemetry Trace Waterfall',
+        title: '5. OpenTelemetry Trace Waterfall',
         subtitle: 'Inspect W3C microsecond span Gantt charts & RFC 9457 payloads',
         keywords: 'otel traceparent spans waterfall gantt 409 429 503',
         icon: Activity,
-        badge: activeTab === 'traces' ? 'ACTIVE' : 'TAB 4',
+        badge: activeTab === 'traces' ? 'ACTIVE' : 'TAB 5',
         active: activeTab === 'traces',
         onExecute: () => setActiveTab('traces'),
       },
       {
         id: 'nav-benchmarks',
         group: 'Navigation',
-        title: '5. Verified CI Benchmarks & Polyglot Code Vault',
+        title: '6. Verified CI Benchmarks & Polyglot Code Vault',
         subtitle: '.NET 10 release benchmarks, Python RAG evals, source code',
         keywords: 'ci benchmark dotnet python lua sql code vault',
         icon: FileCode2,
-        badge: activeTab === 'benchmarks' ? 'ACTIVE' : 'TAB 5',
+        badge: activeTab === 'benchmarks' ? 'ACTIVE' : 'TAB 6',
         active: activeTab === 'benchmarks',
         onExecute: () => setActiveTab('benchmarks'),
       },
       {
         id: 'nav-roi',
         group: 'Navigation',
-        title: '6. Executive ROI & License Hub',
+        title: '7. Executive ROI & License Hub',
         subtitle: 'Flash-sale protection calculator, MBBank VietQR & architect dossier',
         keywords: 'roi calculator cv resume architect contact license vietqr',
         icon: TrendingUp,
-        badge: activeTab === 'roi' ? 'ACTIVE' : 'TAB 6',
+        badge: activeTab === 'roi' ? 'ACTIVE' : 'TAB 7',
         active: activeTab === 'roi',
         onExecute: () => setActiveTab('roi'),
       },
@@ -725,19 +772,27 @@ export function App() {
 
   return (
     <div className="min-h-screen pb-16">
-      {/* Command Palette Modal (Cmd/Ctrl+K) */}
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        commands={paletteCommands}
-      />
+      {/* Command Palette Modal (Cmd/Ctrl+K) — Lazy Loaded */}
+      {paletteOpen && (
+        <Suspense fallback={null}>
+          <CommandPalette
+            open={paletteOpen}
+            onClose={() => setPaletteOpen(false)}
+            commands={paletteCommands}
+          />
+        </Suspense>
+      )}
 
-      {/* Enterprise License Quote & Live MBBank VietQR Checkout Modal */}
-      <EnterpriseLicenseModal
-        open={licenseModalOpen}
-        lang={lang}
-        onClose={() => setLicenseModalOpen(false)}
-      />
+      {/* Enterprise License Quote & Live MBBank VietQR Checkout Modal — Lazy Loaded */}
+      {licenseModalOpen && (
+        <Suspense fallback={null}>
+          <EnterpriseLicenseModal
+            open={licenseModalOpen}
+            lang={lang}
+            onClose={() => setLicenseModalOpen(false)}
+          />
+        </Suspense>
+      )}
 
       {/* Top Command Header */}
       <header className="surface-header sticky top-0 z-30 border-b backdrop-blur-md">
@@ -840,6 +895,7 @@ export function App() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <nav className="flex gap-1 overflow-x-auto py-1.5" aria-label="Main Tabs">
             {[
+              { id: 'voucher', label: uiCopy.tabs.voucher, icon: Banknote },
               { id: 'raft', label: uiCopy.tabs.raft, icon: Globe },
               { id: 'arena', label: uiCopy.tabs.arena, icon: Flame },
               { id: 'sre-rag', label: uiCopy.tabs.sreRag, icon: Bot },
@@ -871,42 +927,55 @@ export function App() {
       </header>
 
       <main className="mx-auto mt-4 max-w-7xl px-4 sm:px-6">
-        {/* TAB 1 (DEFAULT v3.0): GLOBAL 5-REGION RAFT CHAOS + 250K RPS FLAMEGRAPH + SRE RUNBOOK */}
+        {/* TAB 1 (FLAGSHIP v4.0): CON CUNG 500-REQUEST VOUCHER RACE-CONDITION SIMULATOR */}
+        {activeTab === 'voucher' && (
+          <Suspense fallback={<ModuleLoadingFallback label="Con Cung 500-Request Voucher Race Arena" />}>
+            <VoucherRaceArena lang={lang} />
+          </Suspense>
+        )}
+
+        {/* TAB 2: GLOBAL 5-REGION RAFT CHAOS + 250K RPS FLAMEGRAPH + SRE RUNBOOK */}
         {activeTab === 'raft' && (
           <div className="space-y-6">
-            <MultiRegionRaftDeck
-              cluster={cluster}
-              lang={lang}
-              theme={theme}
-              onCutRegionFiber={handleCutRegionFiber}
-              onToggleTailLatency={handleToggleTailLatency}
-              onToggleRedisStampede={handleToggleRedisStampede}
-              onToggleDbExhaustion={handleToggleDbExhaustion}
-              onRestoreAll={handleRestoreAllRegions}
-              onTransferLeader={handleTransferLeader}
-            />
+            <Suspense fallback={<ModuleLoadingFallback label="5-Region Raft & Chaos Control Deck" />}>
+              <MultiRegionRaftDeck
+                cluster={cluster}
+                lang={lang}
+                theme={theme}
+                onCutRegionFiber={handleCutRegionFiber}
+                onToggleTailLatency={handleToggleTailLatency}
+                onToggleRedisStampede={handleToggleRedisStampede}
+                onToggleDbExhaustion={handleToggleDbExhaustion}
+                onRestoreAll={handleRestoreAllRegions}
+                onTransferLeader={handleTransferLeader}
+              />
+            </Suspense>
 
-            <LoadStressFlamegraph
-              telemetry={loadProfile}
-              targetRps={stressRps}
-              runtime={profilerRuntime}
-              lang={lang}
-              theme={theme}
-              onTargetRpsChange={setStressRps}
-              onRuntimeChange={setProfilerRuntime}
-            />
+            <Suspense fallback={<ModuleLoadingFallback label="250K RPS Load Stress Flamegraph" />}>
+              <LoadStressFlamegraph
+                telemetry={loadProfile}
+                targetRps={stressRps}
+                runtime={profilerRuntime}
+                lang={lang}
+                theme={theme}
+                onTargetRpsChange={setStressRps}
+                onRuntimeChange={setProfilerRuntime}
+              />
+            </Suspense>
 
-            <IncidentRunbookExecutor
-              runbook={runbook}
-              currentLiveP99Ms={loadProfile.p99Ms}
-              lang={lang}
-              onExecuteStep={handleExecuteRunbookStep}
-              onExecuteNext={handleExecuteNextRunbook}
-              onExecuteAll={handleExecuteAllRunbook}
-              onReset={handleResetRunbook}
-              onExportMarkdown={handleExportRunbookMd}
-              onExportJson={handleExportRunbookJson}
-            />
+            <Suspense fallback={<ModuleLoadingFallback label="SRE Incident Runbook Executor" />}>
+              <IncidentRunbookExecutor
+                runbook={runbook}
+                currentLiveP99Ms={loadProfile.p99Ms}
+                lang={lang}
+                onExecuteStep={handleExecuteRunbookStep}
+                onExecuteNext={handleExecuteNextRunbook}
+                onExecuteAll={handleExecuteAllRunbook}
+                onReset={handleResetRunbook}
+                onExportMarkdown={handleExportRunbookMd}
+                onExportJson={handleExportRunbookJson}
+              />
+            </Suspense>
           </div>
         )}
 
@@ -1096,14 +1165,16 @@ export function App() {
             </div>
 
             {/* 60fps Live Real-Time Packet-Flow Topology Canvas + Synchronized Stage Sparklines */}
-            <LivePacketTopologyCanvas
-              mode={simResult.mode}
-              snapshot={snap}
-              throughputRps={simResult.throughputRps}
-              isRunning={isSimulating}
-              stageTelemetry={simResult.stageTelemetry}
-              theme={theme}
-            />
+            <Suspense fallback={<ModuleLoadingFallback label="60fps Live Packet Topology Canvas" />}>
+              <LivePacketTopologyCanvas
+                mode={simResult.mode}
+                snapshot={snap}
+                throughputRps={simResult.throughputRps}
+                isRunning={isSimulating}
+                stageTelemetry={simResult.stageTelemetry}
+                theme={theme}
+              />
+            </Suspense>
 
             {/* Simulation Control Deck + Chaos Fault Injector */}
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
@@ -1337,13 +1408,15 @@ export function App() {
             </div>
 
             {/* Latency Distribution Histogram (P50/P95/P99) + Head-to-Head 3-Engine Comparative Arena */}
-            <EngineRaceArena
-              activeResult={simResult}
-              showdownResults={showdownResults}
-              isRacing={isSimulating}
-              onLaunchRace={() => void handleThreeModeShowdown()}
-              onInspectEngineResult={(r) => void handleInspectEngineResult(r)}
-            />
+            <Suspense fallback={<ModuleLoadingFallback label="3-Engine Comparative Race Arena" />}>
+              <EngineRaceArena
+                activeResult={simResult}
+                showdownResults={showdownResults}
+                isRacing={isSimulating}
+                onLaunchRace={() => void handleThreeModeShowdown()}
+                onInspectEngineResult={(r) => void handleInspectEngineResult(r)}
+              />
+            </Suspense>
           </div>
         )}
 
@@ -1438,23 +1511,27 @@ export function App() {
 
             {/* Right: Upgraded Interactive Hybrid RAG Alpha Playground & Post-Mortem Export */}
             <div className="space-y-4 lg:col-span-6">
-              <HybridRagPlayground
-                ragQuery={ragQuery}
-                onRagQueryChange={setRagQuery}
-                alpha={ragAlpha}
-                onAlphaChange={setRagAlpha}
-                ragResult={ragResult}
-                onSearch={(q, a) => void handleRagSearch(q, a)}
-                onExportPostMortem={handleExportPostMortem}
-                onCopyPostMortem={handleCopyPostMortem}
-              />
+              <Suspense fallback={<ModuleLoadingFallback label="Hybrid RAG Playground" />}>
+                <HybridRagPlayground
+                  ragQuery={ragQuery}
+                  onRagQueryChange={setRagQuery}
+                  alpha={ragAlpha}
+                  onAlphaChange={setRagAlpha}
+                  ragResult={ragResult}
+                  onSearch={(q, a) => void handleRagSearch(q, a)}
+                  onExportPostMortem={handleExportPostMortem}
+                  onCopyPostMortem={handleCopyPostMortem}
+                />
+              </Suspense>
             </div>
           </div>
         )}
 
-        {/* TAB 3: OPENTELEMETRY TRACE WATERFALL */}
+        {/* TAB 5: OPENTELEMETRY TRACE WATERFALL */}
         {activeTab === 'traces' && (
-          <TraceWaterfallPanel traces={simResult?.sampledTraces ?? []} />
+          <Suspense fallback={<ModuleLoadingFallback label="OpenTelemetry Trace Waterfall" />}>
+            <TraceWaterfallPanel traces={simResult?.sampledTraces ?? []} />
+          </Suspense>
         )}
 
         {/* TAB 4: VERIFIED CI BENCHMARKS & POLYGLOT CODE VAULT */}

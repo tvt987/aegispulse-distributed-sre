@@ -2,20 +2,21 @@ export type LangMode = 'en' | 'vi';
 
 export const UI_COPY = {
   en: {
-    versionBadge: 'V3.0 ENTERPRISE SUPER VIP PRO',
+    versionBadge: 'V4.0 CON CUNG 5K RPS PROOF',
     headerSubtitle:
-      '5-Region Raft Quorum · 250K RPS Flamegraph · .NET 10 Kernel · Hybrid RAG SRE',
+      '700-Store Voucher Race Arena · 5-Region Raft Quorum · 250K RPS Flamegraph · .NET 10 Kernel',
     licenseBtn: 'Enterprise License · 22.9M',
     licenseBtnShort: 'License · 22.9M',
     commandsBtn: 'Commands',
     githubBtn: 'GitHub & CI',
     tabs: {
-      raft: '1. Raft & Chaos Plane',
-      arena: '2. Concurrency Arena',
-      sreRag: '3. Agentic SRE & RAG',
-      traces: '4. OTel Waterfall',
-      benchmarks: '5. CI Benchmarks & Code',
-      roi: '6. ROI & License Hub',
+      voucher: '1. Voucher 500x Race',
+      raft: '2. Raft & Chaos Plane',
+      arena: '3. Concurrency Arena',
+      sreRag: '4. Agentic SRE & RAG',
+      traces: '5. OTel Waterfall',
+      benchmarks: '6. CI Benchmarks & Code',
+      roi: '7. ROI & License Hub',
     },
     raftSection: {
       eyebrow: 'MULTI-REGION RAFT CONSENSUS & FAULT INJECTION',
@@ -79,20 +80,21 @@ export const UI_COPY = {
     },
   },
   vi: {
-    versionBadge: 'V3.0 ENTERPRISE SUPER VIP PRO',
+    versionBadge: 'V4.0 CHỨNG THỰC CON CƯNG 5K RPS',
     headerSubtitle:
-      'Raft Quorum 5 Vùng · Kiểm Tải 250K RPS & Flamegraph GC · Lõi .NET 10 · Hybrid RAG',
+      'Đấu Trường Voucher 500x · Raft Quorum 5 Vùng · Kiểm Tải 250K RPS · Lõi .NET 10',
     licenseBtn: 'Bản Quyền · 22.9M',
     licenseBtnShort: 'Bản Quyền · 22.9M',
     commandsBtn: 'Lệnh Nhanh',
     githubBtn: 'Mã Nguồn',
     tabs: {
-      raft: '1. Raft 5 Vùng & Chaos',
-      arena: '2. Đấu Trường 60fps',
-      sreRag: '3. Agent SRE & RAG',
-      traces: '4. Truy Vết OTel',
-      benchmarks: '5. Benchmark & Kho Mã',
-      roi: '6. ROI & Bản Quyền',
+      voucher: '1. Đấu Trường Voucher 500x',
+      raft: '2. Raft 5 Vùng & Chaos',
+      arena: '3. Đấu Trường 60fps',
+      sreRag: '4. Agent SRE & RAG',
+      traces: '5. Truy Vết OTel',
+      benchmarks: '6. Benchmark & Kho Mã',
+      roi: '7. ROI & Bản Quyền',
     },
     raftSection: {
       eyebrow: 'ĐỒNG THUẬN RAFT ĐA VÙNG & TIÊM LỖI CHAOS',
