@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Serialization;
+using AegisPulse.Domain.Sql;
 using AegisPulse.Domain.Sre;
 using AegisPulse.Domain.Vouchers;
 using Microsoft.AspNetCore.Mvc;
@@ -25,6 +26,8 @@ builder.Services.AddSingleton(sp =>
         openCooldown: TimeSpan.FromSeconds(15),
         timeProvider: sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton<RaftQuorumEvaluator>();
+builder.Services.AddSingleton<QuorumFailoverEvaluator>();
+builder.Services.AddSingleton<SqlExecutionPlanAdvisor>();
 builder.Services.AddSingleton(sp =>
     new VoucherRedemptionEngine(
         circuitBreaker: sp.GetRequiredService<CircuitBreakerStateMachine>(),
@@ -47,9 +50,9 @@ app.MapGet("/health", (
     {
         status = raftStatus.HasQuorum && cb.State != CircuitBreakerState.Open ? "healthy" : "degraded",
         service = "aegispulse-api",
-        version = "4.0.0",
+        version = "5.0.0",
         runtime = $".NET {Environment.Version}",
-        architecture = "Redis Lua Atomic Gate + SQL Server ROWVERSION + Dapper",
+        architecture = "Redis Lua Atomic Gate + SQL Server ROWVERSION + Covering Index Dapper + 5-Region Raft",
         raftQuorum = raftStatus.QuorumStatus,
         circuitBreaker = cb.State.ToString(),
         doubleSpendCount = metrics.TotalDoubleSpends,
@@ -191,7 +194,7 @@ app.MapGet("/api/v1/sre/cluster-status", (
     return Results.Ok(new
     {
         service = "aegispulse-sre-control-plane",
-        version = "4.0.0",
+        version = "5.0.0",
         raft = raftStatus,
         circuitBreaker = cbSnapshot,
         voucherEngine = new
@@ -214,6 +217,86 @@ app.MapGet("/api/v1/sre/cluster-status", (
         },
         timestampUtc = DateTimeOffset.UtcNow
     });
+});
+
+app.MapPost("/api/v1/sql/execution-plan", (
+    [FromBody] SqlExecutionPlanHttpRequest? request,
+    SqlExecutionPlanAdvisor advisor) =>
+{
+    var tableRowCount = request?.TableRowCount ?? SqlExecutionPlanAdvisor.DefaultTableRowCount;
+    var concurrencyRps = request?.ConcurrencyRps ?? SqlExecutionPlanAdvisor.DefaultConcurrencyRps;
+
+    if (tableRowCount <= 0)
+    {
+        return Results.Problem(
+            title: "Invalid Table Row Count",
+            detail: "TableRowCount must be a positive integer (e.g., 5000000).",
+            statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    if (concurrencyRps <= 0)
+    {
+        return Results.Problem(
+            title: "Invalid Concurrency Load",
+            detail: "ConcurrencyRps must be a positive integer (e.g., 5000).",
+            statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    if (!TryParseSqlStage(request?.Stage, out var parsedStage))
+    {
+        return Results.Problem(
+            title: "Invalid Optimization Stage",
+            detail: "Stage must be LegacyEfCoreScan (1), CoveringIndexDapperCas (2), or RedisLuaWriteBehind (3).",
+            statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    var evaluation = advisor.Evaluate(
+        stage: parsedStage,
+        tableRowCount: tableRowCount,
+        concurrencyRps: concurrencyRps,
+        voucherCode: request?.VoucherCode);
+
+    return Results.Ok(evaluation);
+});
+
+app.MapPost("/api/v1/cluster/quorum-evaluate", (
+    [FromBody] ClusterQuorumEvaluateHttpRequest? request,
+    QuorumFailoverEvaluator evaluator) =>
+{
+    var parsedStates = new Dictionary<string, QuorumRegionHealthState>(StringComparer.OrdinalIgnoreCase);
+    if (request?.RegionStates is not null)
+    {
+        foreach (var kv in request.RegionStates)
+        {
+            if (!TryParseRegionState(kv.Value, out var healthState))
+            {
+                return Results.Problem(
+                    title: "Invalid Region Health State",
+                    detail: $"Unsupported state '{kv.Value}' for region '{kv.Key}'. Expected Online, Partitioned, or HardCrash.",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            parsedStates[kv.Key] = healthState;
+        }
+    }
+
+    try
+    {
+        var result = evaluator.Evaluate(new QuorumEvaluationRequest(
+            CurrentTerm: request?.CurrentTerm ?? 42,
+            PreviousLeaderId: request?.PreviousLeaderId ?? "vn-hcm",
+            RegionStates: parsedStates
+        ));
+
+        return Results.Ok(result);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.Problem(
+            title: "Invalid Region Identifier",
+            detail: ex.Message,
+            statusCode: StatusCodes.Status400BadRequest);
+    }
 });
 
 app.MapGet("/metrics", (
@@ -271,4 +354,80 @@ public sealed record RedeemVoucherHttpRequest(
     string? StoreCode = null
 );
 
-public partial class Program;
+public sealed record SqlExecutionPlanHttpRequest(
+    string? Stage = null,
+    long? TableRowCount = null,
+    int? ConcurrencyRps = null,
+    string? VoucherCode = null
+);
+
+public sealed record ClusterQuorumEvaluateHttpRequest(
+    long? CurrentTerm = null,
+    string? PreviousLeaderId = null,
+    Dictionary<string, string>? RegionStates = null
+);
+
+public partial class Program
+{
+    private static bool TryParseSqlStage(string? raw, out SqlOptimizationStage stage)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            stage = SqlOptimizationStage.CoveringIndexDapperCas;
+            return true;
+        }
+
+        var normalized = raw.Trim().Replace("-", "").Replace("_", "");
+        if (normalized is "1" or "stage1" or "legacy" or "legacyefcorescan" or "efcore")
+        {
+            stage = SqlOptimizationStage.LegacyEfCoreScan;
+            return true;
+        }
+
+        if (normalized is "2" or "stage2" or "covering" or "coveringindexdappercas" or "dapper")
+        {
+            stage = SqlOptimizationStage.CoveringIndexDapperCas;
+            return true;
+        }
+
+        if (normalized is "3" or "stage3" or "redis" or "redisluawritebehind" or "lua")
+        {
+            stage = SqlOptimizationStage.RedisLuaWriteBehind;
+            return true;
+        }
+
+        return Enum.TryParse(raw.Trim(), ignoreCase: true, out stage);
+    }
+
+    private static bool TryParseRegionState(string? raw, out QuorumRegionHealthState state)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            state = QuorumRegionHealthState.Online;
+            return true;
+        }
+
+        var normalized = raw.Trim().Replace("_", "").Replace("-", "").Replace(" ", "");
+        if (normalized.Equals("online", StringComparison.OrdinalIgnoreCase))
+        {
+            state = QuorumRegionHealthState.Online;
+            return true;
+        }
+
+        if (normalized.Equals("partitioned", StringComparison.OrdinalIgnoreCase))
+        {
+            state = QuorumRegionHealthState.Partitioned;
+            return true;
+        }
+
+        if (normalized.Equals("hardcrash", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("crashed", StringComparison.OrdinalIgnoreCase))
+        {
+            state = QuorumRegionHealthState.HardCrash;
+            return true;
+        }
+
+        state = default;
+        return false;
+    }
+}

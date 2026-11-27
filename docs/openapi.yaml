@@ -1,15 +1,15 @@
 openapi: 3.1.0
 info:
   title: AegisPulse Distributed SRE & Voucher Concurrency API
-  version: 4.0.0
-  summary: High-Concurrency .NET 10 Voucher Redemption & Multi-Region SRE Control Plane
+  version: 5.0.0
+  summary: High-Concurrency .NET 10 Voucher Redemption, SQL Server Plan Advisor & 5-Region Quorum SRE Control Plane
   description: |
-    Production OpenAPI 3.1 contract for AegisPulse v4.0 (`backend/src/AegisPulse.Api`),
+    Production OpenAPI 3.1 contract for AegisPulse v5.0 (`backend/src/AegisPulse.Api`),
     implementing Truong Van Tinh's Con Cung 700-Store / 5,000+ RPS architecture:
     - Single-threaded Redis Lua `EVALSHA` atomic quota gate
     - RFC `Idempotency-Key` SHA-256 payload fingerprinting & response replay cache
-    - SQL Server `ROWVERSION` optimistic concurrency persistence via Dapper
-    - 5-Region Raft Quorum health evaluation & Adaptive Circuit Breaker telemetry
+    - SQL Server `ROWVERSION` optimistic concurrency persistence & 5M-row covering-index plan advisor via Dapper
+    - 5-Region Raft Quorum (`VN-HCM`, `SG-1`, `JP-Tokyo`, `US-East`, `EU-West`) split-brain `READ_ONLY_FENCE` evaluation & Adaptive Circuit Breaker telemetry
   contact:
     name: Truong Van Tinh
     email: tinhkun102@gmail.com
@@ -31,6 +31,10 @@ tags:
     description: Atomic high-concurrency promo voucher seeding, redemption, and audit proof
   - name: SRE
     description: 5-Region Raft quorum consensus and Adaptive Circuit Breaker telemetry
+  - name: SQL Advisor
+    description: 5,000,000-row SQL Server execution plan modeling & Dapper covering index DDL advisor
+  - name: Cluster Quorum
+    description: 5-Region Raft quorum failover & automatic READ_ONLY_FENCE split-brain evaluation
 
 paths:
   /health:
@@ -215,6 +219,79 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SreClusterStatusResponse'
+
+  /api/v1/sql/execution-plan:
+    post:
+      tags: [SQL Advisor]
+      operationId: evaluateSqlExecutionPlan
+      summary: Compute SQL Server execution operator tree, logical reads, p99 latency & covering index DDL
+      description: |
+        Models Con Cung's 5,000,000-row `dbo.Vouchers` + `dbo.VoucherRedemptions` query across 3 stages:
+        - `LegacyEfCoreScan` (`28.4 ms`, `14,200` logical reads, `125 MB` heap, table lock escalation)
+        - `CoveringIndexDapperCas` (`1.8 ms`, `14` logical reads, `18 MB` RAM, `-93.7%` latency)
+        - `RedisLuaWriteBehind` (`0.42 ms`, `0` SQL contention reads on bursts)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SqlExecutionPlanRequest'
+            example:
+              stage: CoveringIndexDapperCas
+              tableRowCount: 5000000
+              concurrencyRps: 5000
+              voucherCode: CONCUNG-VIP-500K
+      responses:
+        '200':
+          description: Deterministic SQL Server operator tree, metrics, and generated T-SQL/Dapper/Lua artifacts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SqlExecutionPlanEvaluation'
+        '400':
+          description: Invalid stage, row count, or concurrency RPS
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/v1/cluster/quorum-evaluate:
+    post:
+      tags: [Cluster Quorum]
+      operationId: evaluateClusterQuorum
+      summary: Evaluate 5-region Raft quorum, automatic leader election, READ_ONLY_FENCE safety & RPO/RTO
+      description: |
+        Evaluates any regional health bitmap across `vn-hcm`, `sg-1`, `jp-tokyo`, `us-east`, and `eu-west`
+        (`Online`, `Partitioned`, or `HardCrash`). Automatically enforces `READ_ONLY_FENCE` when `< 3/5`
+        nodes remain online to prevent dual-writer voucher double-spending.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClusterQuorumEvaluateRequest'
+            example:
+              currentTerm: 42
+              previousLeaderId: vn-hcm
+              regionStates:
+                vn-hcm: HardCrash
+                sg-1: Online
+                jp-tokyo: Online
+                us-east: Online
+                eu-west: Online
+      responses:
+        '200':
+          description: Deterministic quorum state, elected leader, write-fence decision, WAL lag, and RPO/RTO
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuorumEvaluationResult'
+        '400':
+          description: Unknown region identifier or unsupported health state
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
 
 components:
   schemas:
@@ -546,3 +623,288 @@ components:
           type: string
         instance:
           type: string
+
+    SqlExecutionPlanRequest:
+      type: object
+      properties:
+        stage:
+          type: string
+          enum: [LegacyEfCoreScan, CoveringIndexDapperCas, RedisLuaWriteBehind]
+          default: CoveringIndexDapperCas
+        tableRowCount:
+          type: integer
+          format: int64
+          minimum: 1
+          default: 5000000
+        concurrencyRps:
+          type: integer
+          minimum: 1
+          default: 5000
+        voucherCode:
+          type: string
+          nullable: true
+          default: CONCUNG-VIP-500K
+
+    SqlPlanOperator:
+      type: object
+      required:
+        - id
+        - name
+        - physicalOp
+        - costPercent
+        - logicalReads
+        - cpuMs
+        - estimatedRows
+        - lockGranularity
+        - waitType
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        physicalOp:
+          type: string
+        costPercent:
+          type: integer
+        logicalReads:
+          type: integer
+          format: int64
+        cpuMs:
+          type: number
+        estimatedRows:
+          type: integer
+          format: int64
+        lockGranularity:
+          type: string
+        waitType:
+          type: string
+        warning:
+          type: string
+          nullable: true
+
+    SqlStageSummary:
+      type: object
+      required:
+        - stage
+        - stageCode
+        - title
+        - executionTimeMs
+        - p99LatencyMs
+        - logicalReads
+        - memoryFootprintMb
+        - latencyReductionPctVsLegacy
+        - lockEscalationRisk
+      properties:
+        stage:
+          type: string
+          enum: [LegacyEfCoreScan, CoveringIndexDapperCas, RedisLuaWriteBehind]
+        stageCode:
+          type: string
+        title:
+          type: string
+        executionTimeMs:
+          type: number
+        p99LatencyMs:
+          type: number
+        logicalReads:
+          type: integer
+          format: int64
+        memoryFootprintMb:
+          type: number
+        latencyReductionPctVsLegacy:
+          type: number
+        lockEscalationRisk:
+          type: string
+
+    SqlExecutionPlanEvaluation:
+      type: object
+      required:
+        - stage
+        - stageCode
+        - title
+        - subtitle
+        - tableRowCount
+        - concurrencyRps
+        - voucherCode
+        - executionTimeMs
+        - p99LatencyMs
+        - logicalReads
+        - memoryFootprintMb
+        - latencyReductionPctVsLegacy
+        - lockGranularity
+        - lockEscalationRisk
+        - hasLockEscalationWarning
+        - operators
+        - recommendedIndexDdl
+        - recommendedDapperCSharp
+        - recommendedRedisLua
+        - allStagesComparison
+      properties:
+        stage:
+          type: string
+          enum: [LegacyEfCoreScan, CoveringIndexDapperCas, RedisLuaWriteBehind]
+        stageCode:
+          type: string
+        title:
+          type: string
+        subtitle:
+          type: string
+        tableRowCount:
+          type: integer
+          format: int64
+        concurrencyRps:
+          type: integer
+        voucherCode:
+          type: string
+        executionTimeMs:
+          type: number
+        p99LatencyMs:
+          type: number
+        logicalReads:
+          type: integer
+          format: int64
+        memoryFootprintMb:
+          type: number
+        latencyReductionPctVsLegacy:
+          type: number
+        lockGranularity:
+          type: string
+        lockEscalationRisk:
+          type: string
+        hasLockEscalationWarning:
+          type: boolean
+        operators:
+          type: array
+          items:
+            $ref: '#/components/schemas/SqlPlanOperator'
+        recommendedIndexDdl:
+          type: string
+        recommendedDapperCSharp:
+          type: string
+        recommendedRedisLua:
+          type: string
+        allStagesComparison:
+          type: array
+          items:
+            $ref: '#/components/schemas/SqlStageSummary'
+
+    ClusterQuorumEvaluateRequest:
+      type: object
+      properties:
+        currentTerm:
+          type: integer
+          format: int64
+          default: 42
+        previousLeaderId:
+          type: string
+          nullable: true
+          default: vn-hcm
+        regionStates:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [Online, Partitioned, HardCrash, ONLINE, PARTITIONED, HARD_CRASH]
+
+    QuorumNodeSnapshot:
+      type: object
+      required:
+        - regionId
+        - displayName
+        - location
+        - state
+        - role
+        - rttToLeaderMs
+        - walReplicationLagMs
+        - fencingToken
+        - acceptsWrites
+      properties:
+        regionId:
+          type: string
+        displayName:
+          type: string
+        location:
+          type: string
+        state:
+          type: string
+          enum: [Online, Partitioned, HardCrash]
+        role:
+          type: string
+          enum: [Leader, Follower, Partitioned, Crashed, Fenced]
+        rttToLeaderMs:
+          type: integer
+        walReplicationLagMs:
+          type: number
+        fencingToken:
+          type: integer
+          format: int64
+        acceptsWrites:
+          type: boolean
+
+    QuorumEvaluationResult:
+      type: object
+      required:
+        - totalNodes
+        - quorumRequired
+        - onlineNodes
+        - partitionedNodes
+        - crashedNodes
+        - hasQuorum
+        - clusterWriteMode
+        - splitBrainFenceActive
+        - doubleSpendPrevented
+        - raftTerm
+        - electionTriggered
+        - quorumCommitRttMs
+        - maxWalReplicationLagMs
+        - rpoSeconds
+        - rtoSummary
+        - decisionReason
+        - nodes
+      properties:
+        totalNodes:
+          type: integer
+        quorumRequired:
+          type: integer
+        onlineNodes:
+          type: integer
+        partitionedNodes:
+          type: integer
+        crashedNodes:
+          type: integer
+        hasQuorum:
+          type: boolean
+        clusterWriteMode:
+          type: string
+          enum: [READ_WRITE, READ_ONLY_FENCE]
+        splitBrainFenceActive:
+          type: boolean
+        doubleSpendPrevented:
+          type: boolean
+        electedLeaderRegionId:
+          type: string
+          nullable: true
+        electedLeaderName:
+          type: string
+          nullable: true
+        raftTerm:
+          type: integer
+          format: int64
+        electionTriggered:
+          type: boolean
+        quorumCommitRttMs:
+          type: integer
+        maxWalReplicationLagMs:
+          type: number
+        rpoSeconds:
+          type: number
+        rtoMs:
+          type: integer
+          nullable: true
+        rtoSummary:
+          type: string
+        decisionReason:
+          type: string
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuorumNodeSnapshot'

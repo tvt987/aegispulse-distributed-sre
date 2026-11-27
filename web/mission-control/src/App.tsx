@@ -85,6 +85,12 @@ import { UI_COPY, type LangMode } from './i18n/translations';
 const VoucherRaceArena = lazy(() =>
   import('./components/VoucherRaceArena').then((m) => ({ default: m.VoucherRaceArena }))
 );
+const SqlPlanAdvisorLab = lazy(() =>
+  import('./components/SqlPlanAdvisorLab').then((m) => ({ default: m.SqlPlanAdvisorLab }))
+);
+const QuorumFailoverLab = lazy(() =>
+  import('./components/QuorumFailoverLab').then((m) => ({ default: m.QuorumFailoverLab }))
+);
 const MultiRegionRaftDeck = lazy(() =>
   import('./components/MultiRegionRaftDeck').then((m) => ({ default: m.MultiRegionRaftDeck }))
 );
@@ -116,7 +122,16 @@ const EnterpriseLicenseModal = lazy(() =>
 const DEFAULT_RAG_QUERY =
   'How to prevent flash-sale voucher double-spending and negative stock with Redis Lua and RowVersion?';
 
-type ActiveTab = 'voucher' | 'raft' | 'arena' | 'sre-rag' | 'traces' | 'benchmarks' | 'roi';
+type ActiveTab =
+  | 'voucher'
+  | 'sql-plan'
+  | 'quorum'
+  | 'raft'
+  | 'arena'
+  | 'sre-rag'
+  | 'traces'
+  | 'benchmarks'
+  | 'roi';
 
 function ModuleLoadingFallback({ label }: { label: string }) {
   return (
@@ -535,22 +550,44 @@ export function App() {
       {
         id: 'nav-voucher',
         group: 'Navigation',
-        title: '1. Con Cung 500-Request Voucher Race Arena (v4.0)',
+        title: '1. Con Cung 500-Request Voucher Race Arena',
         subtitle: '500 concurrent requests vs 1x 500K VND voucher: Naive leak vs UPDLOCK vs Redis Lua + ROWVERSION',
-        keywords: 'voucher race 500 concung redis lua rowversion dapper double spend lock v4',
+        keywords: 'voucher race 500 concung redis lua rowversion dapper double spend lock v4 v5',
         icon: Banknote,
         badge: activeTab === 'voucher' ? 'ACTIVE' : 'TAB 1',
         active: activeTab === 'voucher',
         onExecute: () => setActiveTab('voucher'),
       },
       {
+        id: 'nav-sql-plan',
+        group: 'Navigation',
+        title: '2. SQL Server 5M-Row Execution Plan & Dapper Index Advisor (v5.0)',
+        subtitle: 'Toggle EF Core Scan (28.4ms) -> Covering Index Dapper (1.8ms) -> Redis Lua (0.42ms)',
+        keywords: 'sql server execution plan dapper covering index rowversion 5m rows logical reads v5',
+        icon: Database,
+        badge: activeTab === 'sql-plan' ? 'ACTIVE' : 'V5 NEW',
+        active: activeTab === 'sql-plan',
+        onExecute: () => setActiveTab('sql-plan'),
+      },
+      {
+        id: 'nav-quorum',
+        group: 'Navigation',
+        title: '3. 5-Region Raft Quorum & Split-Brain Failover Lab (v5.0)',
+        subtitle: 'Click VN-HCM / SG-1 / JP-Tokyo / US-East / EU-West to trigger leader election & READ_ONLY_FENCE',
+        keywords: 'quorum raft failover split brain read only fence rpo rto wal lag v5',
+        icon: ShieldCheck,
+        badge: activeTab === 'quorum' ? 'ACTIVE' : 'V5 NEW',
+        active: activeTab === 'quorum',
+        onExecute: () => setActiveTab('quorum'),
+      },
+      {
         id: 'nav-raft',
         group: 'Navigation',
-        title: '2. Global Raft & Chaos Control Plane',
-        subtitle: '5-region Raft quorum, fiber-cut chaos, 250K RPS flamegraph & SRE runbook',
+        title: '4. Chaos Fault Plane & 250K RPS Flamegraph',
+        subtitle: 'Global chaos injector, 250K RPS CPU/GC flamegraph & SRE runbook',
         keywords: 'raft quorum region fiber chaos load stress flamegraph runbook v3',
         icon: Globe,
-        badge: activeTab === 'raft' ? 'ACTIVE' : 'TAB 2',
+        badge: activeTab === 'raft' ? 'ACTIVE' : 'TAB 4',
         active: activeTab === 'raft',
         onExecute: () => setActiveTab('raft'),
       },
@@ -896,6 +933,8 @@ export function App() {
           <nav className="flex gap-1 overflow-x-auto py-1.5" aria-label="Main Tabs">
             {[
               { id: 'voucher', label: uiCopy.tabs.voucher, icon: Banknote },
+              { id: 'sql-plan', label: uiCopy.tabs.sqlPlan, icon: Database },
+              { id: 'quorum', label: uiCopy.tabs.quorum, icon: ShieldCheck },
               { id: 'raft', label: uiCopy.tabs.raft, icon: Globe },
               { id: 'arena', label: uiCopy.tabs.arena, icon: Flame },
               { id: 'sre-rag', label: uiCopy.tabs.sreRag, icon: Bot },
@@ -927,14 +966,28 @@ export function App() {
       </header>
 
       <main className="mx-auto mt-4 max-w-7xl px-4 sm:px-6">
-        {/* TAB 1 (FLAGSHIP v4.0): CON CUNG 500-REQUEST VOUCHER RACE-CONDITION SIMULATOR */}
+        {/* TAB 1: CON CUNG 500-REQUEST VOUCHER RACE-CONDITION SIMULATOR */}
         {activeTab === 'voucher' && (
           <Suspense fallback={<ModuleLoadingFallback label="Con Cung 500-Request Voucher Race Arena" />}>
             <VoucherRaceArena lang={lang} />
           </Suspense>
         )}
 
-        {/* TAB 2: GLOBAL 5-REGION RAFT CHAOS + 250K RPS FLAMEGRAPH + SRE RUNBOOK */}
+        {/* TAB 2 (NEW v5.0): 5M-ROW SQL SERVER EXECUTION PLAN & DAPPER INDEX ADVISOR */}
+        {activeTab === 'sql-plan' && (
+          <Suspense fallback={<ModuleLoadingFallback label="SQL Server Execution Plan & Dapper Index Advisor" />}>
+            <SqlPlanAdvisorLab lang={lang} theme={theme} />
+          </Suspense>
+        )}
+
+        {/* TAB 3 (NEW v5.0): 5-REGION RAFT QUORUM & SPLIT-BRAIN FAILOVER LAB */}
+        {activeTab === 'quorum' && (
+          <Suspense fallback={<ModuleLoadingFallback label="5-Region Raft Quorum & Split-Brain Failover Lab" />}>
+            <QuorumFailoverLab lang={lang} theme={theme} />
+          </Suspense>
+        )}
+
+        {/* TAB 4: GLOBAL 5-REGION RAFT CHAOS + 250K RPS FLAMEGRAPH + SRE RUNBOOK */}
         {activeTab === 'raft' && (
           <div className="space-y-6">
             <Suspense fallback={<ModuleLoadingFallback label="5-Region Raft & Chaos Control Deck" />}>

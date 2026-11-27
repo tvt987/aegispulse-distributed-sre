@@ -2,21 +2,23 @@ export type LangMode = 'en' | 'vi';
 
 export const UI_COPY = {
   en: {
-    versionBadge: 'V4.0 CON CUNG 5K RPS PROOF',
+    versionBadge: 'V5.0 CON CUNG 5K RPS PROOF',
     headerSubtitle:
-      '700-Store Voucher Race Arena · 5-Region Raft Quorum · 250K RPS Flamegraph · .NET 10 Kernel',
+      '700-Store Voucher Race · SQL 5M Plan Advisor · 5-Region Quorum Lab · .NET 10 Kernel',
     licenseBtn: 'Enterprise License · 22.9M',
     licenseBtnShort: 'License · 22.9M',
     commandsBtn: 'Commands',
     githubBtn: 'GitHub & CI',
     tabs: {
       voucher: '1. Voucher 500x Race',
-      raft: '2. Raft & Chaos Plane',
-      arena: '3. Concurrency Arena',
-      sreRag: '4. Agentic SRE & RAG',
-      traces: '5. OTel Waterfall',
-      benchmarks: '6. CI Benchmarks & Code',
-      roi: '7. ROI & License Hub',
+      sqlPlan: '2. SQL Plan Advisor',
+      quorum: '3. 5-Region Quorum Lab',
+      raft: '4. Chaos & Flamegraph',
+      arena: '5. Concurrency Arena',
+      sreRag: '6. Agentic SRE & RAG',
+      traces: '7. OTel Waterfall',
+      benchmarks: '8. CI Benchmarks & Code',
+      roi: '9. ROI & License Hub',
     },
     raftSection: {
       eyebrow: 'MULTI-REGION RAFT CONSENSUS & FAULT INJECTION',
@@ -80,21 +82,23 @@ export const UI_COPY = {
     },
   },
   vi: {
-    versionBadge: 'V4.0 CHỨNG THỰC CON CƯNG 5K RPS',
+    versionBadge: 'V5.0 CHỨNG THỰC CON CƯNG 5K RPS',
     headerSubtitle:
-      'Đấu Trường Voucher 500x · Raft Quorum 5 Vùng · Kiểm Tải 250K RPS · Lõi .NET 10',
+      'Đấu Trường Voucher 500x · SQL Plan 5M Dòng · Quorum 5 Vùng · Lõi .NET 10',
     licenseBtn: 'Bản Quyền · 22.9M',
     licenseBtnShort: 'Bản Quyền · 22.9M',
     commandsBtn: 'Lệnh Nhanh',
     githubBtn: 'Mã Nguồn',
     tabs: {
       voucher: '1. Đấu Trường Voucher 500x',
-      raft: '2. Raft 5 Vùng & Chaos',
-      arena: '3. Đấu Trường 60fps',
-      sreRag: '4. Agent SRE & RAG',
-      traces: '5. Truy Vết OTel',
-      benchmarks: '6. Benchmark & Kho Mã',
-      roi: '7. ROI & Bản Quyền',
+      sqlPlan: '2. SQL Plan & Index',
+      quorum: '3. Lab Quorum 5 Vùng',
+      raft: '4. Chaos & Flamegraph',
+      arena: '5. Đấu Trường 60fps',
+      sreRag: '6. Agent SRE & RAG',
+      traces: '7. Truy Vết OTel',
+      benchmarks: '8. Benchmark & Kho Mã',
+      roi: '9. ROI & Bản Quyền',
     },
     raftSection: {
       eyebrow: 'ĐỒNG THUẬN RAFT ĐA VÙNG & TIÊM LỖI CHAOS',

@@ -23,6 +23,14 @@ export default defineConfig({
           if (id.includes('/src/engine/localHybridRag')) {
             return 'rag-engine';
           }
+          if (
+            id.includes('/src/engines/chaosEngine') ||
+            id.includes('/src/engines/loadProfilerEngine') ||
+            id.includes('/src/engines/runbookEngine') ||
+            id.includes('/src/engine/localKernel')
+          ) {
+            return 'sre-sim-engines';
+          }
           return undefined;
         },
       },
