@@ -2,15 +2,16 @@ export type LangMode = 'en' | 'vi';
 
 export const UI_COPY = {
   en: {
-    versionBadge: 'v6.0 · CON CUNG 5K RPS',
+    versionBadge: 'v7.0 · DST CHAOS ARENA',
     headerSubtitle:
-      '700+ Retail Stores · .NET 10 Distributed SRE & High-Concurrency Architecture',
+      '700+ Retail Stores · .NET 10 Distributed SRE & Deterministic Simulation Testing',
     licenseBtn: 'Enterprise License · 22.9M',
     licenseBtnShort: 'License',
     commandsBtn: 'Commands',
     githubBtn: 'GitHub',
     moreLabsBtn: 'More Suites',
     tabs: {
+      dstArena: 'DST Chaos Arena',
       voucher: 'Voucher Race',
       ratelimit: 'Rate Limiter',
       sqlPlan: 'SQL Plan 5M',
@@ -84,15 +85,16 @@ export const UI_COPY = {
     },
   },
   vi: {
-    versionBadge: 'v6.0 · CON CƯNG 5K RPS',
+    versionBadge: 'v7.0 · ĐẤU TRƯỜNG DST',
     headerSubtitle:
-      '700+ Siêu Thị · Kiến Trúc SRE Phân Tán & Chịu Tải Cao .NET 10',
+      '700+ Siêu Thị · Kiến Trúc SRE Phân Tán .NET 10 & Kiểm Thử Mô Phỏng Xác Định',
     licenseBtn: 'Bản Quyền · 22.9M',
     licenseBtnShort: 'Bản Quyền',
     commandsBtn: 'Lệnh Nhanh',
     githubBtn: 'Mã Nguồn',
     moreLabsBtn: 'Mô-đun Khác',
     tabs: {
+      dstArena: 'DST Chaos',
       voucher: 'Voucher 500x',
       ratelimit: 'Rate Limiter',
       sqlPlan: 'SQL Plan 5M',

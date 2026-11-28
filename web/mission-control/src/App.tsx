@@ -23,6 +23,7 @@ import {
   Play,
   QrCode,
   RotateCcw,
+  Scissors,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -84,6 +85,9 @@ import {
 import { UI_COPY, type LangMode } from './i18n/translations';
 
 // Code-split lazy modules so initial entry bundle stays lean and fast
+const DstChaosArenaCanvas = lazy(() =>
+  import('./components/DstChaosArenaCanvas').then((m) => ({ default: m.DstChaosArenaCanvas }))
+);
 const VoucherRaceArena = lazy(() =>
   import('./components/VoucherRaceArena').then((m) => ({ default: m.VoucherRaceArena }))
 );
@@ -128,6 +132,7 @@ const DEFAULT_RAG_QUERY =
   'How to prevent flash-sale voucher double-spending and negative stock with Redis Lua and RowVersion?';
 
 type ActiveTab =
+  | 'dst-arena'
   | 'voucher'
   | 'ratelimit'
   | 'sql-plan'
@@ -140,6 +145,7 @@ type ActiveTab =
   | 'roi';
 
 const SECONDARY_TAB_IDS: ReadonlySet<ActiveTab> = new Set([
+  'raft',
   'arena',
   'sre-rag',
   'traces',
@@ -185,7 +191,7 @@ function readInitialLang(): LangMode {
 }
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('voucher');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('dst-arena');
   const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
   const [lang, setLang] = useState<LangMode>(readInitialLang);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -574,6 +580,17 @@ export function App() {
   // Command Palette registry
   const paletteCommands = useMemo<PaletteCommand[]>(
     () => [
+      {
+        id: 'nav-dst-arena',
+        group: 'Navigation',
+        title: 'DST Chaos-Scissors & Distributed Packet Arena (v7.0 Primary)',
+        subtitle: 'Sever inter-region links, crash/revive servers, blast 500-req voucher storms & scrub Jepsen timeline',
+        keywords: 'dst deterministic simulation chaos scissors split brain raft jepsen linearizability voucher storm v7',
+        icon: Scissors,
+        badge: activeTab === 'dst-arena' ? 'ACTIVE' : 'V7 NEW',
+        active: activeTab === 'dst-arena',
+        onExecute: () => setActiveTab('dst-arena'),
+      },
       {
         id: 'nav-voucher',
         group: 'Navigation',
@@ -977,11 +994,11 @@ export function App() {
                 aria-label="Primary Flagship Labs"
               >
                 {[
+                  { id: 'dst-arena' as ActiveTab, label: uiCopy.tabs.dstArena, icon: Scissors, badge: 'v7' },
                   { id: 'voucher' as ActiveTab, label: uiCopy.tabs.voucher, icon: Banknote, badge: null },
-                  { id: 'ratelimit' as ActiveTab, label: uiCopy.tabs.ratelimit, icon: Gauge, badge: 'v6' },
+                  { id: 'ratelimit' as ActiveTab, label: uiCopy.tabs.ratelimit, icon: Gauge, badge: null },
                   { id: 'sql-plan' as ActiveTab, label: uiCopy.tabs.sqlPlan, icon: Database, badge: null },
                   { id: 'quorum' as ActiveTab, label: uiCopy.tabs.quorum, icon: ShieldCheck, badge: null },
-                  { id: 'raft' as ActiveTab, label: uiCopy.tabs.raft, icon: Globe, badge: null },
                 ].map((tab) => {
                   const Icon = tab.icon;
                   const isActive = activeTab === tab.id;
@@ -1029,17 +1046,19 @@ export function App() {
                 >
                   <Layers className="h-3.5 w-3.5 shrink-0 text-cyan-500" />
                   <span className="hidden sm:inline">
-                    {activeTab === 'arena'
-                      ? uiCopy.tabs.arena
-                      : activeTab === 'sre-rag'
-                        ? uiCopy.tabs.sreRag
-                        : activeTab === 'traces'
-                          ? uiCopy.tabs.traces
-                          : activeTab === 'benchmarks'
-                            ? uiCopy.tabs.benchmarks
-                            : activeTab === 'roi'
-                              ? uiCopy.tabs.roi
-                              : uiCopy.moreLabsBtn}
+                    {activeTab === 'raft'
+                      ? uiCopy.tabs.raft
+                      : activeTab === 'arena'
+                        ? uiCopy.tabs.arena
+                        : activeTab === 'sre-rag'
+                          ? uiCopy.tabs.sreRag
+                          : activeTab === 'traces'
+                            ? uiCopy.tabs.traces
+                            : activeTab === 'benchmarks'
+                              ? uiCopy.tabs.benchmarks
+                              : activeTab === 'roi'
+                                ? uiCopy.tabs.roi
+                                : uiCopy.moreLabsBtn}
                   </span>
                   <span className="sm:hidden">More</span>
                   <ChevronDown
@@ -1058,6 +1077,7 @@ export function App() {
                       Telemetry, RAG &amp; Executive Suites
                     </div>
                     {[
+                      { id: 'raft' as ActiveTab, label: uiCopy.tabs.raft, icon: Globe },
                       { id: 'arena' as ActiveTab, label: uiCopy.tabs.arena, icon: Flame },
                       { id: 'sre-rag' as ActiveTab, label: uiCopy.tabs.sreRag, icon: Bot },
                       { id: 'traces' as ActiveTab, label: uiCopy.tabs.traces, icon: Activity },
@@ -1106,8 +1126,19 @@ export function App() {
         </div>
       </header>
 
-      <main className="mx-auto mt-6 max-w-7xl px-4 sm:mt-7 sm:px-6">
-        {/* TAB 1: CON CUNG 500-REQUEST VOUCHER RACE-CONDITION SIMULATOR */}
+      <main className="mx-auto mt-3.5 max-w-7xl px-4 sm:mt-4 sm:px-6">
+        {/* PRIMARY HERO STAGE (v7.0): DETERMINISTIC SIMULATION TESTING (DST) & INTERACTIVE CHAOS-SCISSORS ARENA */}
+        {activeTab === 'dst-arena' && (
+          <Suspense fallback={<ModuleLoadingFallback label="v7.0 DST Chaos-Scissors Distributed Packet Arena" />}>
+            <DstChaosArenaCanvas
+              lang={lang}
+              theme={theme}
+              onOpenVoucherLab={() => setActiveTab('voucher')}
+            />
+          </Suspense>
+        )}
+
+        {/* TAB 2: CON CUNG 500-REQUEST VOUCHER RACE-CONDITION SIMULATOR */}
         {activeTab === 'voucher' && (
           <Suspense fallback={<ModuleLoadingFallback label="Con Cung 500-Request Voucher Race Arena" />}>
             <VoucherRaceArena
